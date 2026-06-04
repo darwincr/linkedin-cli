@@ -1,0 +1,54 @@
+# linkedin-cli
+
+> A command-line tool and Python library that drives LinkedIn through a real,
+> logged-in browser (Playwright) and LinkedIn's private Voyager API. It is meant
+> to be used by LLM agents as a deterministic tool: every command takes a public
+> profile handle and emits a single JSON object on stdout. Logs and errors go to
+> stderr. There is no API key, no SaaS, and no database — it drives the user's own
+> LinkedIn account on the user's own machine.
+
+## How to use it
+
+A session owner launches and binds one persistent browser; each command connects
+to it. Select the session with `--session <name>` or `$LINKEDIN_CLI_SESSION`.
+Add `--json` to any verb for the full result dict (the default prints a short
+human summary). Credentials come from `$LINKEDIN_USERNAME` / `$LINKEDIN_PASSWORD`.
+
+```
+linkedin-cli session open --session work   # start once; owns the browser, blocks
+linkedin-cli login                         # authenticate the bound session
+linkedin-cli session close                 # stop the session
+```
+
+An `<id>` argument is a public handle (e.g. `alice-smith`) or a profile URL.
+Commands are independent and stateless; the only thing an agent threads between
+steps is the handle.
+
+## Commands and JSON results
+
+- `login` → `{ "account": str, "self": { "public_identifier", "urn", "full_name" } }`
+- `whoami` → `{ "self": { "public_identifier", "urn", "full_name" } }`
+- `search <keywords> [--network first|second|third] [--page N]` →
+  `{ "query", "page", "network": [..], "profiles": [ { "public_identifier", "url" } ] }`
+- `profile <id> [--raw]` → full LinkedIn profile:
+  `{ "url", "urn", "public_identifier", "full_name", "headline", "summary",
+     "location_name", "positions": [..], "educations": [..], "connection_degree" }`
+- `status <id>` → `{ "public_identifier", "state": "Connected"|"Pending"|"Qualified" }`
+- `connect <id>` → `{ "public_identifier", "state": "Pending"|"Qualified" }` (no note)
+- `message <id> --text <msg>` → `{ "public_identifier", "sent": bool }`
+- `thread <id>` → `{ "public_identifier", "messages": [ { "sender", "text", "timestamp" } ] }`
+
+## Errors
+
+On failure: non-zero exit and a line on stderr `error: <type>: <message>`.
+Stable `type` values to branch on: `checkpoint_challenge`, `authentication`,
+`profile_inaccessible`, `skip_profile`, `connection_limit`.
+
+## Typical agent loop
+
+search → for each handle: profile and/or status → message and/or thread.
+
+## More
+
+- README: https://github.com/eracle/linkedin-cli/blob/main/README.md
+- Per-verb help: `linkedin-cli <verb> --help`
