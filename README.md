@@ -32,14 +32,14 @@ it behaves like a human session instead of a cookie-only scraper.
 ## 📦 Install
 
 ```bash
-pip install linkedincli
+pip install linkedin-agent-cli
 python -m playwright install chromium
 ```
 
 This installs the `linkedin-cli` command (equivalent to `python -m linkedin_cli.cli`).
-The PyPI package is `linkedincli`; the import name is `linkedin_cli`. For the
+The PyPI package is `linkedin-agent-cli`; the import name is `linkedin_cli`. For the
 latest unreleased code, install from git:
-`pip install "linkedincli @ git+https://github.com/eracle/linkedin-cli.git@main"`.
+`pip install "linkedin-agent-cli @ git+https://github.com/eracle/linkedin-cli.git@main"`.
 
 ## 🚀 Quickstart
 
