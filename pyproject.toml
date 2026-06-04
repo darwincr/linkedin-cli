@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "linkedin-cli"
+name = "linkedincli"
 version = "0.1.0"
 description = "Django-free library and CLI for LinkedIn platform mechanics over a bound browser session (Voyager API + Playwright)."
 readme = "README.md"
