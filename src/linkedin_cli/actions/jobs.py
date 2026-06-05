@@ -332,23 +332,9 @@ def search_jobs(
 
 def saved_jobs(session: "LinkedInSession", *, page: int = 1) -> dict:
     """Return the visible jobs from LinkedIn's saved jobs page."""
-    session.ensure_browser()
-    goto_page(
-        session,
-        action=lambda: session.page.goto("https://www.linkedin.com/my-items/saved-jobs/"),
-        expected_url_pattern="/my-items/saved-jobs/",
-        error_message="Failed to reach saved jobs",
-    )
+    from linkedin_cli.actions.saved_jobs import list_saved_jobs
 
-    jobs, seen = [], set()
-    for link in session.page.locator(SELECTORS["job_links"]).all():
-        job = _job_from_link(session.page, link)
-        if not job or job["job_id"] in seen:
-            continue
-        seen.add(job["job_id"])
-        jobs.append(job)
-
-    return {"page": page, "jobs": jobs}
+    return list_saved_jobs(session, page=page)
 
 
 def open_job(session: "LinkedInSession", job_id_or_url: str) -> dict:
@@ -382,18 +368,13 @@ def save_job(session: "LinkedInSession", job_id_or_url: str) -> dict:
     return {**job, "saved": saved, "changed": saved}
 
 
-def unsave_job(session: "LinkedInSession", job_id_or_url: str) -> dict:
-    """Unsave a LinkedIn job, no-oping if it is not saved."""
-    job = open_job(session, job_id_or_url)
+def unsave_job(session: "LinkedInSession", jobs: list[str]) -> dict:
+    """Unsave LinkedIn jobs from the saved jobs page."""
+    from linkedin_cli.actions.saved_jobs import unsave_saved_job, unsave_saved_jobs
 
-    saved = session.page.locator(SELECTORS["saved"])
-    if saved.count() == 0:
-        return {**job, "saved": False, "changed": False}
-
-    saved.first.click()
-    session.wait()
-    still_saved = session.page.locator(SELECTORS["saved"]).count() > 0
-    return {**job, "saved": still_saved, "changed": not still_saved}
+    if len(jobs) == 1:
+        return unsave_saved_job(session, jobs[0])
+    return unsave_saved_jobs(session, jobs)
 
 
 def apply_job(session: "LinkedInSession", job_id_or_url: str, *, submit: bool = False) -> dict:

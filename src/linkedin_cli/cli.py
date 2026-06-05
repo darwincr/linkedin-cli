@@ -184,6 +184,10 @@ def _human_jobs_show(result: dict) -> str:
 
 
 def _human_jobs_save(result: dict) -> str:
+    if "jobs" in result:
+        jobs = result.get("jobs") or []
+        changed = sum(1 for job in jobs if job.get("changed"))
+        return f"unsaved {changed}/{len(jobs)}"
     return "saved" if result.get("saved") else "not saved"
 
 
@@ -351,7 +355,7 @@ def _verb_jobs_save(session, args) -> dict:
 def _verb_jobs_unsave(session, args) -> dict:
     from linkedin_cli.actions.jobs import unsave_job
 
-    return unsave_job(session, args.job)
+    return unsave_job(session, args.jobs)
 
 
 def _verb_jobs_apply(session, args) -> dict:
@@ -511,7 +515,7 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_handle_help = "LinkedIn job id or URL"
     jobs_sub.add_parser("show", parents=[common], help="Show structured details for a LinkedIn job").add_argument("job", help=jobs_handle_help)
     jobs_sub.add_parser("save", parents=[common], help="Save a LinkedIn job").add_argument("job", help=jobs_handle_help)
-    jobs_sub.add_parser("unsave", parents=[common], help="Unsave a LinkedIn job").add_argument("job", help=jobs_handle_help)
+    jobs_sub.add_parser("unsave", parents=[common], help="Unsave one or more LinkedIn jobs").add_argument("jobs", nargs="+", help=jobs_handle_help)
 
     p_jobs_apply = jobs_sub.add_parser("apply", parents=[common], help="Start or submit an Easy Apply job application")
     p_jobs_apply.add_argument("job", help=jobs_handle_help)
