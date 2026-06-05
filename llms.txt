@@ -13,6 +13,8 @@ A session owner launches and binds one persistent browser; each command connects
 to it. Select the session with `--session <name>` or `$LINKEDIN_CLI_SESSION`.
 Add `--json` to any verb for the full result dict (the default prints a short
 human summary). Credentials come from `$LINKEDIN_USERNAME` / `$LINKEDIN_PASSWORD`.
+Commands targeting the same session are serialized by a local lock, so concurrent
+agent invocations queue instead of driving the shared browser page at once.
 
 ```
 linkedin-cli session open --session work   # start once; owns the browser, blocks
@@ -37,6 +39,16 @@ steps is the handle.
 - `connect <id>` → `{ "public_identifier", "state": "Pending"|"Qualified" }` (no note)
 - `message <id> --text <msg>` → `{ "public_identifier", "sent": bool }`
 - `thread <id>` → `{ "public_identifier", "messages": [ { "sender", "text", "timestamp" } ] }`
+- `jobs search <keywords> [--location <loc>] [--page N] [--easy-apply] [--remote] [--date-posted past-24h|past-week|past-month] [--job-type full-time|part-time|contract|temporary|internship]` →
+  `{ "query", "location", "page", "filters", "jobs": [ { "job_id", "url", "title", "company", "location", "listed" } ] }`
+- `jobs saved [--page N]` →
+  `{ "page", "jobs": [ { "job_id", "url", "title", "company", "location", "listed" } ] }`
+- `jobs show <job>` →
+  `{ "job_id", "url", "title", "company", "location", "listed", "applicants", "workplace", "employment_type", "saved", "apply_method", "apply_url", "external_url", "ats", "description" }`
+- `jobs save <job>` → `{ "job_id", "url", "saved": bool, "changed": bool }`
+- `jobs unsave <job>` → `{ "job_id", "url", "saved": bool, "changed": bool }`
+- `jobs apply <job> [--submit]` →
+  `{ "job_id", "url", "method": "external"|"easy_apply"|null, "submitted": bool, "manual": bool, "apply_url", "external_url", "ats", ... }`
 
 ## Errors
 

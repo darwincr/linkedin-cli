@@ -11,6 +11,8 @@ the platform code touches, and nothing about campaigns, leads, or the DB.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import logging
 import os
@@ -77,8 +79,34 @@ def _sessions_dir() -> Path:
     return linkedin_cli_home() / "sessions"
 
 
+def _locks_dir() -> Path:
+    return linkedin_cli_home() / "locks"
+
+
 def _session_file(name: str) -> Path:
     return _sessions_dir() / f"{name}.json"
+
+
+def _lock_file(name: str) -> Path:
+    return _locks_dir() / f"{name}.lock"
+
+
+@contextlib.contextmanager
+def session_lock(name: str):
+    """Serialize browser-driving commands for one bound session.
+
+    A bound session exposes one shared browser page. Concurrent verb processes
+    can otherwise interrupt each other's navigation and clicks. `flock` is
+    process-scoped and automatically releases if a process exits or crashes.
+    """
+    path = _lock_file(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def write_session(name: str, endpoint: str, pid: int) -> Path:

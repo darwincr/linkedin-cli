@@ -1,8 +1,8 @@
 # linkedin-cli
 
-**Drive LinkedIn from the command line or any program** — search people, scrape
-profiles, check connection status, send connection requests, and read or send
-messages. One small, dependency-light Python tool that talks to LinkedIn's
+**Drive LinkedIn from the command line or any program** — search people and jobs,
+scrape profiles, check connection status, send connection requests, save/apply
+to jobs, and read or send messages. One small, dependency-light Python tool that talks to LinkedIn's
 private **Voyager API** through a **real, logged-in browser** (Playwright), so
 it behaves like a human session instead of a cookie-only scraper.
 
@@ -19,6 +19,9 @@ it behaves like a human session instead of a cookie-only scraper.
 - **Real browser session, not raw cookies.** A persistent Chromium window is
   launched once and shared; requests ride your live, authenticated session —
   far more resilient than header/cookie replay.
+- **Safe concurrent callers.** Commands targeting the same session are serialized
+  with a local per-session lock, so agents can invoke tools in parallel without
+  corrupting the shared browser page.
 - **Structured JSON out of every command.** Pipe it into `jq`, a script, or an
   LLM agent. Human-readable summaries by default; `--json` for the full record.
 - **Robust login.** Authentication is a small **page-state machine** that
@@ -57,6 +60,7 @@ export LINKEDIN_PASSWORD="••••••••"
 
 linkedin-cli login                                    # authenticate the session
 linkedin-cli search "head of growth" --network first  # discover → handles
+linkedin-cli jobs search "software engineer" --location "United States" --remote
 linkedin-cli profile alice-smith                      # scrape a profile
 linkedin-cli profile alice-smith --json > alice.json  # save the full record
 linkedin-cli status  alice-smith                      # Connected / Pending / Qualified
@@ -84,10 +88,23 @@ so you can clear it by hand, then carry on.
 | `connect <id>` | Send a connection request (no note) | `{public_identifier, state}` |
 | `message <id> --text …` | Send a direct message | `{public_identifier, sent}` |
 | `thread <id>` | Read a conversation's messages | `{public_identifier, messages[]}` |
+| `jobs search <kw> [--location L] [--page N] [--easy-apply] [--remote] [--date-posted past-24h/past-week/past-month] [--job-type full-time/part-time/contract/temporary/internship]` | Jobs search → matching job ids | `{query, location, page, filters, jobs[]}` |
+| `jobs saved [--page N]` | List saved jobs | `{page, jobs[]}` |
+| `jobs show <job>` | Show job details, saved state, and apply method | `{job_id, title, company, description, external_url, ats, ...}` |
+| `jobs save <job>` | Save a job by id or URL | `{job_id, url, saved, changed}` |
+| `jobs unsave <job>` | Unsave a job by id or URL | `{job_id, url, saved, changed}` |
+| `jobs apply <job> [--submit]` | Start an application; submit only if immediately ready | `{job_id, url, method, submitted, manual, ...}` |
 
 An `<id>` is a public handle (`alice-smith`) or a full profile URL. Commands that
 need the internal member `urn` (`message`/`thread`/`status`) resolve it for you —
 every command is independent and takes only a handle.
+
+A `<job>` is a LinkedIn job id (`4418654174`) or a full `/jobs/view/...` URL.
+External-apply jobs return LinkedIn's outbound `apply_url` plus a decoded
+`external_url` when the URL is a LinkedIn safety redirect. `ats` is best-effort
+from the decoded host (`greenhouse`, `lever`, `workday`, `company_site`, etc.).
+Easy Apply jobs open the application flow and only submit when `--submit` is set
+and the first dialog is already ready to submit.
 
 ## 🤖 Built for AI agents (and any language)
 

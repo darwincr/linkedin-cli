@@ -42,7 +42,7 @@ from linkedin_cli.exceptions import (
     ReachedConnectionLimit,
     SkipProfile,
 )
-from linkedin_cli.session import PlaywrightCliSession, clear_session, linkedin_cli_home, read_session
+from linkedin_cli.session import PlaywrightCliSession, clear_session, linkedin_cli_home, read_session, session_lock
 from linkedin_cli.url_utils import public_id_to_url, url_to_public_id
 
 logger = logging.getLogger("linkedin_cli")
@@ -140,6 +140,63 @@ def _human_search(result: dict) -> str:
     return "\n".join([header] + [f"  {p['public_identifier']}" for p in profiles])
 
 
+def _human_jobs_search(result: dict) -> str:
+    jobs = result.get("jobs") or []
+    if not jobs:
+        return "(no results)"
+    header = f"{len(jobs)} job(s) on page {result.get('page', 1)}:"
+    return "\n".join(
+        [header] + [
+            "  " + " — ".join(x for x in (j.get("job_id"), j.get("title"), j.get("company")) if x)
+            for j in jobs
+        ]
+    )
+
+
+def _human_jobs_saved(result: dict) -> str:
+    jobs = result.get("jobs") or []
+    if not jobs:
+        return "(no saved jobs)"
+    header = f"{len(jobs)} saved job(s):"
+    return "\n".join(
+        [header] + [
+            "  " + " — ".join(x for x in (j.get("job_id"), j.get("title"), j.get("company")) if x)
+            for j in jobs
+        ]
+    )
+
+
+def _human_jobs_show(result: dict) -> str:
+    lines = [" — ".join(x for x in (result.get("title"), result.get("company")) if x)]
+    subtitle = " · ".join(x for x in (
+        result.get("location"),
+        result.get("workplace"),
+        result.get("employment_type"),
+        "saved" if result.get("saved") else None,
+        result.get("apply_method"),
+    ) if x)
+    if subtitle:
+        lines.append(subtitle)
+    if result.get("apply_url"):
+        lines.append(f"apply: {result['apply_url']}")
+    lines.append("(--json for the full record)")
+    return "\n".join(line for line in lines if line)
+
+
+def _human_jobs_save(result: dict) -> str:
+    return "saved" if result.get("saved") else "not saved"
+
+
+def _human_jobs_apply(result: dict) -> str:
+    if result.get("submitted"):
+        return "submitted"
+    if result.get("apply_url"):
+        return f"external apply: {result['apply_url']}"
+    if result.get("method") == "easy_apply":
+        return f"easy apply opened: {result.get('next_step', 'review_modal')}"
+    return "manual apply required"
+
+
 def _human_closed(result: dict) -> str:
     return f"closed {result.get('name')}"
 
@@ -153,6 +210,12 @@ _HUMAN = {
     "profile": _human_profile,
     "thread": _human_thread,
     "search": _human_search,
+    "jobs-search": _human_jobs_search,
+    "jobs-saved": _human_jobs_saved,
+    "jobs-show": _human_jobs_show,
+    "jobs-save": _human_jobs_save,
+    "jobs-unsave": _human_jobs_save,
+    "jobs-apply": _human_jobs_apply,
     "session-close": _human_closed,
 }
 
@@ -252,6 +315,51 @@ def _verb_search(session, args) -> dict:
     return search_people(session, args.keywords, page=args.page, network=codes or None)
 
 
+def _verb_jobs_search(session, args) -> dict:
+    from linkedin_cli.actions.jobs import search_jobs
+
+    return search_jobs(
+        session,
+        args.keywords,
+        location=args.location,
+        page=args.page,
+        easy_apply=args.easy_apply,
+        remote=args.remote,
+        date_posted=args.date_posted,
+        job_type=args.job_type,
+    )
+
+
+def _verb_jobs_saved(session, args) -> dict:
+    from linkedin_cli.actions.jobs import saved_jobs
+
+    return saved_jobs(session, page=args.page)
+
+
+def _verb_jobs_show(session, args) -> dict:
+    from linkedin_cli.actions.jobs import show_job
+
+    return show_job(session, args.job)
+
+
+def _verb_jobs_save(session, args) -> dict:
+    from linkedin_cli.actions.jobs import save_job
+
+    return save_job(session, args.job)
+
+
+def _verb_jobs_unsave(session, args) -> dict:
+    from linkedin_cli.actions.jobs import unsave_job
+
+    return unsave_job(session, args.job)
+
+
+def _verb_jobs_apply(session, args) -> dict:
+    from linkedin_cli.actions.jobs import apply_job
+
+    return apply_job(session, args.job, submit=args.submit)
+
+
 _VERBS = {
     "login": _verb_login,
     "whoami": _verb_whoami,
@@ -261,6 +369,12 @@ _VERBS = {
     "message": _verb_message,
     "thread": _verb_thread,
     "search": _verb_search,
+    "jobs-search": _verb_jobs_search,
+    "jobs-saved": _verb_jobs_saved,
+    "jobs-show": _verb_jobs_show,
+    "jobs-save": _verb_jobs_save,
+    "jobs-unsave": _verb_jobs_unsave,
+    "jobs-apply": _verb_jobs_apply,
 }
 
 
@@ -275,48 +389,50 @@ def _cmd_session_open(args) -> int:
 
 
 def _cmd_session_close(args) -> int:
-    record = read_session(args.name)
-    if not record:
-        _err(f"error: usage: no open session named {args.name!r}")
-        return 2
-    try:
-        os.kill(record["pid"], signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    clear_session(args.name)
-    _render("session-close", {"name": args.name, "closed": True}, args.json)
-    return 0
+    with session_lock(args.name):
+        record = read_session(args.name)
+        if not record:
+            _err(f"error: usage: no open session named {args.name!r}")
+            return 2
+        try:
+            os.kill(record["pid"], signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        clear_session(args.name)
+        _render("session-close", {"name": args.name, "closed": True}, args.json)
+        return 0
 
 
 # ── verb runner ────────────────────────────────────────────────────
 
 def _run_verb(args) -> int:
-    record = read_session(args.name)
-    if not record:
-        _err(f"error: usage: no open session named {args.name!r} — run "
-             f"`linkedin-cli session open --session {args.name}`")
-        return 2
+    with session_lock(args.name):
+        record = read_session(args.name)
+        if not record:
+            _err(f"error: usage: no open session named {args.name!r} — run "
+                 f"`linkedin-cli session open --session {args.name}`")
+            return 2
 
-    session = PlaywrightCliSession(
-        record["endpoint"],
-        min_pace=DEFAULT_MIN_PACE_S,
-        max_pace=DEFAULT_MAX_PACE_S,
-        username=os.environ.get("LINKEDIN_USERNAME"),
-        password=os.environ.get("LINKEDIN_PASSWORD"),
-        name=args.name,
-    )
-    try:
-        session.ensure_browser()
-        _render(args.verb, _VERBS[args.verb](session, args), args.json)
-        return 0
-    except Exception as exc:  # noqa: BLE001 — map known errors, re-raise the rest
-        error_type = _error_type(exc)
-        if error_type is None:
-            raise
-        _err(f"error: {error_type}: {exc}")
-        return 1
-    finally:
-        session.close()
+        session = PlaywrightCliSession(
+            record["endpoint"],
+            min_pace=DEFAULT_MIN_PACE_S,
+            max_pace=DEFAULT_MAX_PACE_S,
+            username=os.environ.get("LINKEDIN_USERNAME"),
+            password=os.environ.get("LINKEDIN_PASSWORD"),
+            name=args.name,
+        )
+        try:
+            session.ensure_browser()
+            _render(args.verb, _VERBS[args.verb](session, args), args.json)
+            return 0
+        except Exception as exc:  # noqa: BLE001 — map known errors, re-raise the rest
+            error_type = _error_type(exc)
+            if error_type is None:
+                raise
+            _err(f"error: {error_type}: {exc}")
+            return 1
+        finally:
+            session.close()
 
 
 # ── parser ─────────────────────────────────────────────────────────
@@ -374,8 +490,32 @@ def build_parser() -> argparse.ArgumentParser:
                               help="Search People by keyword; list matching profile handles")
     p_search.add_argument("keywords", help="Search keywords, e.g. 'San Francisco'")
     p_search.add_argument("--network", action="append", choices=["first", "second", "third"],
-                          help="Filter by connection degree (repeatable): first / second / third")
+                           help="Filter by connection degree (repeatable): first / second / third")
     p_search.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
+
+    jobs_cmd = sub.add_parser("jobs", help="Search, save, and apply to LinkedIn jobs")
+    jobs_sub = jobs_cmd.add_subparsers(dest="jobs_cmd", required=True)
+
+    p_jobs_search = jobs_sub.add_parser("search", parents=[common], help="Search LinkedIn Jobs by keyword")
+    p_jobs_search.add_argument("keywords", help="Search keywords, e.g. 'software engineer'")
+    p_jobs_search.add_argument("--location", help="Optional location, e.g. 'United States'")
+    p_jobs_search.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
+    p_jobs_search.add_argument("--easy-apply", action="store_true", help="Only show Easy Apply jobs")
+    p_jobs_search.add_argument("--remote", action="store_true", help="Only show remote jobs")
+    p_jobs_search.add_argument("--date-posted", choices=["past-24h", "past-week", "past-month"], help="Filter by when the job was posted")
+    p_jobs_search.add_argument("--job-type", choices=["full-time", "part-time", "contract", "temporary", "internship"], help="Filter by job type")
+
+    p_jobs_saved = jobs_sub.add_parser("saved", parents=[common], help="List saved LinkedIn jobs")
+    p_jobs_saved.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
+
+    jobs_handle_help = "LinkedIn job id or URL"
+    jobs_sub.add_parser("show", parents=[common], help="Show structured details for a LinkedIn job").add_argument("job", help=jobs_handle_help)
+    jobs_sub.add_parser("save", parents=[common], help="Save a LinkedIn job").add_argument("job", help=jobs_handle_help)
+    jobs_sub.add_parser("unsave", parents=[common], help="Unsave a LinkedIn job").add_argument("job", help=jobs_handle_help)
+
+    p_jobs_apply = jobs_sub.add_parser("apply", parents=[common], help="Start or submit an Easy Apply job application")
+    p_jobs_apply.add_argument("job", help=jobs_handle_help)
+    p_jobs_apply.add_argument("--submit", action="store_true", help="Submit only if the first Easy Apply dialog is immediately ready")
     return parser
 
 
@@ -392,7 +532,7 @@ def main(argv=None) -> int:
     if args.cmd == "session":
         return _cmd_session_open(args) if args.subcmd == "open" else _cmd_session_close(args)
 
-    args.verb = args.cmd
+    args.verb = f"jobs-{args.jobs_cmd}" if args.cmd == "jobs" else args.cmd
     return _run_verb(args)
 
 
