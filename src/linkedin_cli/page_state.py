@@ -36,6 +36,7 @@ class PageState(str, Enum):
 _ROUTES: list[tuple[str, PageState]] = [
     ("/checkpoint", PageState.CHECKPOINT),
     ("/login", PageState.LOGIN),
+    ("/uas/login", PageState.LOGIN),  # LinkedIn's legacy login endpoint, the target of /feed/ → sign-in redirects
     ("/authwall", PageState.AUTHWALL),
     ("/feed", PageState.FEED),
     ("/in/", PageState.PROFILE),
