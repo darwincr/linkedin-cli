@@ -152,6 +152,22 @@ The discovery → outreach loop an agent runs: **`search` → `profile` / `statu
   `checkpoint_challenge`, `authentication`, `profile_inaccessible`,
   `skip_profile`, `connection_limit`.
 
+## 🔖 Releases
+
+Releases are **fully automated** — there is no manual publish step.
+
+- **Every push to `main`** triggers the `publish.yml` GitHub Actions workflow, which builds
+  and uploads a stable `0.1.<commit-count>` release to PyPI via
+  [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC, no stored token).
+  The version is monotonic and unique per commit, so `pip install -U linkedin-agent-cli`
+  always picks up the latest push.
+- **Deliberate minor/major bumps:** push a `vX.Y.Z` tag — that commit publishes exactly
+  `X.Y.Z` (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
+
+The version is injected at build time (`SETUPTOOLS_SCM_PRETEND_VERSION`); `hatch-vcs`
+derives the version from git for local/`git+`-installed builds. Re-runs are idempotent
+(`skip-existing`).
+
 ## ⚠️ Responsible use
 
 This tool automates **your own** LinkedIn account from **your own** machine.
