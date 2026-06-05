@@ -42,7 +42,7 @@ from linkedin_cli.exceptions import (
     ReachedConnectionLimit,
     SkipProfile,
 )
-from linkedin_cli.session import PlaywrightCliSession, linkedin_cli_home, read_session
+from linkedin_cli.session import PlaywrightCliSession, clear_session, linkedin_cli_home, read_session
 from linkedin_cli.url_utils import public_id_to_url, url_to_public_id
 
 logger = logging.getLogger("linkedin_cli")
@@ -279,7 +279,11 @@ def _cmd_session_close(args) -> int:
     if not record:
         _err(f"error: usage: no open session named {args.name!r}")
         return 2
-    os.kill(record["pid"], signal.SIGTERM)
+    try:
+        os.kill(record["pid"], signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    clear_session(args.name)
     _render("session-close", {"name": args.name, "closed": True}, args.json)
     return 0
 
