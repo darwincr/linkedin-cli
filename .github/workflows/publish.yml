@@ -1,0 +1,53 @@
+name: Publish to PyPI
+
+# Publishes a fresh STABLE release on every push to main: the version is
+# 0.1.<commit-count>, which is monotonic (commit count only grows), unique per
+# commit, and a final release (no .dev/pre-release segment), so a plain
+# `pip install linkedin-agent-cli` picks it up immediately. Push a vX.Y.Z tag
+# to cut a deliberate minor/major bump instead. skip-existing makes re-runs
+# idempotent.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC token for PyPI Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so the commit count is correct
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compute version
+        id: ver
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"          # vX.Y.Z -> X.Y.Z
+          else
+            VERSION="0.1.$(git rev-list --count HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing version $VERSION"
+
+      - name: Build sdist + wheel
+        env:
+          # hatch-vcs honours this PRETEND var, overriding the git-derived version
+          # at build time. Safe here because CI builds only this one package.
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

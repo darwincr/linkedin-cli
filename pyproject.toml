@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "linkedin-agent-cli"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Django-free library and CLI for LinkedIn platform mechanics over a bound browser session (Voyager API + Playwright)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,6 +39,10 @@ Issues = "https://github.com/eracle/linkedin-cli/issues"
 
 [project.scripts]
 linkedin-cli = "linkedin_cli.cli:main"
+
+[tool.hatch.version]
+source = "vcs"
+raw-options = { local_scheme = "no-local-version" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/linkedin_cli"]
