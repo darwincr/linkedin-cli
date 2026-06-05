@@ -42,7 +42,7 @@ python -m playwright install chromium
 This installs the `linkedin-cli` command (equivalent to `python -m linkedin_cli.cli`).
 The PyPI package is `linkedin-agent-cli`; the import name is `linkedin_cli`. For the
 latest unreleased code, install from git:
-`pip install "linkedin-agent-cli @ git+https://github.com/eracle/linkedin-cli.git@main"`.
+`pip install "linkedin-agent-cli @ git+https://github.com/darwincr/linkedin-cli.git@main"`.
 
 ## 🚀 Quickstart
 

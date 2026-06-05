@@ -33,9 +33,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/eracle/linkedin-cli"
-Repository = "https://github.com/eracle/linkedin-cli"
-Issues = "https://github.com/eracle/linkedin-cli/issues"
+Homepage = "https://github.com/darwincr/linkedin-cli"
+Repository = "https://github.com/darwincr/linkedin-cli"
+Issues = "https://github.com/darwincr/linkedin-cli/issues"
 
 [project.scripts]
 linkedin-cli = "linkedin_cli.cli:main"

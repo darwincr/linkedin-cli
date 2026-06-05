@@ -62,5 +62,5 @@ search → for each handle: profile and/or status → message and/or thread.
 
 ## More
 
-- README: https://github.com/eracle/linkedin-cli/blob/main/README.md
+- README: https://github.com/darwincr/linkedin-cli/blob/main/README.md
 - Per-verb help: `linkedin-cli <verb> --help`
