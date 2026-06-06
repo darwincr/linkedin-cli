@@ -79,6 +79,8 @@ company pages the session can administer before calling company page commands.
 - `posts draft --text <text>` → `{ "drafted": bool, "text" }`
 - `posts schedule --text <text> --at YYYY-MM-DDTHH:MM` →
   `{ "scheduled": bool, "scheduled_at", "text" }`
+- `posts update-schedule <index> --at YYYY-MM-DDTHH:MM` →
+  `{ "updated": bool, "index", "activity_id", "previous_scheduled_at", "scheduled_at", "scheduled_label", "content" }`
 - `posts scheduled` →
   `{ "scheduled_posts": [ { "index", "activity_id", "scheduled_at", "scheduled_label", "content" } ] }`
 - `posts cancel <index>` →
@@ -100,6 +102,8 @@ company pages the session can administer before calling company page commands.
   `{ "company_id", "posted": bool, "text", "images", "documents", "poll", "uploaded_images", "uploaded_documents" }`
 - `page post-schedule <company-id> --text <text> --at YYYY-MM-DDTHH:MM` →
   `{ "company_id", "scheduled": bool, "scheduled_at", "text" }`
+- `page post-update-schedule <company-id> <index> --at YYYY-MM-DDTHH:MM` →
+  `{ "company_id", "updated": bool, "index", "activity_id", "previous_scheduled_at", "scheduled_at", "scheduled_label", "content" }`
 - `page post-scheduled <company-id>` →
   `{ "company_id", "scheduled_posts": [ { "index", "activity_id", "scheduled_at", "scheduled_label", "content" } ] }`
 - `page post-cancel <company-id> <index>` →
@@ -128,9 +132,9 @@ Read-only commands: `whoami`, `search`, `profile`, `status`, `inbox`, `thread`,
 
 Commands that change LinkedIn state: `connect`, `message`, `jobs save`,
 `jobs unsave`, `jobs apply --submit`, `notifications reply`, `notifications react`,
-`posts create`, `posts draft`, `posts schedule`, `posts cancel`, `posts delete`, `posts react`,
+`posts create`, `posts draft`, `posts schedule`, `posts update-schedule`, `posts cancel`, `posts delete`, `posts react`,
 `posts comment-reply`, `posts comment-react`, `page post-create`,
-`page post-schedule`, `page post-cancel`, `page post-delete`, `page reply`.
+`page post-schedule`, `page post-update-schedule`, `page post-cancel`, `page post-delete`, `page reply`.
 
 ## Errors
 

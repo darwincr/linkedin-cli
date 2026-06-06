@@ -274,6 +274,8 @@ def _human_post_write(result: dict) -> str:
         return "draft saved"
     if result.get("scheduled"):
         return f"scheduled for {result.get('scheduled_at')}"
+    if result.get("updated"):
+        return f"updated scheduled post {result.get('index')} to {result.get('scheduled_at')}"
     if result.get("cancelled"):
         return f"cancelled scheduled post {result.get('index')}"
     if result.get("deleted"):
@@ -331,6 +333,8 @@ def _human_page_post_write(result: dict) -> str:
         return "posted"
     if result.get("scheduled"):
         return f"scheduled for {result.get('scheduled_at')}"
+    if result.get("updated"):
+        return f"updated scheduled page post {result.get('index')} to {result.get('scheduled_at')}"
     if result.get("cancelled"):
         return f"cancelled scheduled page post {result.get('index')}"
     if result.get("deleted"):
@@ -385,6 +389,7 @@ _HUMAN = {
     "posts-create": _human_post_write,
     "posts-draft": _human_post_write,
     "posts-schedule": _human_post_write,
+    "posts-update-schedule": _human_post_write,
     "posts-scheduled": _human_posts,
     "posts-cancel": _human_post_write,
     "posts-delete": _human_post_write,
@@ -399,6 +404,7 @@ _HUMAN = {
     "page-post": _human_post,
     "page-post-create": _human_page_post_write,
     "page-post-schedule": _human_page_post_write,
+    "page-post-update-schedule": _human_page_post_write,
     "page-post-scheduled": _human_page_posts,
     "page-post-cancel": _human_page_post_write,
     "page-post-delete": _human_page_post_write,
@@ -604,6 +610,12 @@ def _verb_posts_schedule(session, args) -> dict:
     return schedule_post(session, args.text, args.at)
 
 
+def _verb_posts_update_schedule(session, args) -> dict:
+    from linkedin_cli.actions.posts import update_scheduled_post_time
+
+    return update_scheduled_post_time(session, args.index, args.at)
+
+
 def _verb_posts_scheduled(session, args) -> dict:
     from linkedin_cli.actions.posts import list_scheduled_posts
 
@@ -696,6 +708,12 @@ def _verb_page_post_schedule(session, args) -> dict:
     return schedule_page_post(session, args.company, args.text, args.at)
 
 
+def _verb_page_post_update_schedule(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import update_page_scheduled_post_time
+
+    return update_page_scheduled_post_time(session, args.company, args.index, args.at)
+
+
 def _verb_page_post_scheduled(session, args) -> dict:
     from linkedin_cli.actions.page_admin import list_page_scheduled_posts
 
@@ -755,6 +773,7 @@ _VERBS = {
     "posts-create": _verb_posts_create,
     "posts-draft": _verb_posts_draft,
     "posts-schedule": _verb_posts_schedule,
+    "posts-update-schedule": _verb_posts_update_schedule,
     "posts-scheduled": _verb_posts_scheduled,
     "posts-cancel": _verb_posts_cancel,
     "posts-delete": _verb_posts_delete,
@@ -769,6 +788,7 @@ _VERBS = {
     "page-post": _verb_page_post,
     "page-post-create": _verb_page_post_create,
     "page-post-schedule": _verb_page_post_schedule,
+    "page-post-update-schedule": _verb_page_post_update_schedule,
     "page-post-scheduled": _verb_page_post_scheduled,
     "page-post-cancel": _verb_page_post_cancel,
     "page-post-delete": _verb_page_post_delete,
@@ -952,6 +972,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_posts_schedule.add_argument("--text", required=True, help="Post body text")
     p_posts_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
 
+    p_posts_update_schedule = posts_sub.add_parser("update-schedule", parents=[common], help="Update the scheduled datetime for a scheduled post by 1-based index")
+    p_posts_update_schedule.add_argument("index", type=int, help="1-based index from the scheduled posts list")
+    p_posts_update_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
+
     posts_sub.add_parser("scheduled", parents=[common], help="List scheduled posts")
 
     p_posts_cancel = posts_sub.add_parser("cancel", parents=[common], help="Cancel a scheduled post by 1-based index")
@@ -1013,6 +1037,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_page_post_schedule.add_argument("company", help=company_help)
     p_page_post_schedule.add_argument("--text", required=True, help="Post body text")
     p_page_post_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
+
+    p_page_post_update_schedule = page_sub.add_parser("post-update-schedule", parents=[common], help="Update the scheduled datetime for a company page post by 1-based index")
+    p_page_post_update_schedule.add_argument("company", help=company_help)
+    p_page_post_update_schedule.add_argument("index", type=int, help="1-based index from the scheduled page posts list")
+    p_page_post_update_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
 
     p_page_post_scheduled = page_sub.add_parser("post-scheduled", parents=[common], help="List scheduled company page posts")
     p_page_post_scheduled.add_argument("company", help=company_help)

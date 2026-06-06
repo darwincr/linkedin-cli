@@ -784,20 +784,26 @@ def delete_post(session: "LinkedInSession", post_id_or_url: str) -> dict:
 
 def list_scheduled_posts(session: "LinkedInSession", open_scheduled_posts=None) -> dict:
     """List scheduled posts from the LinkedIn feed management page."""
+    modal_posts = _scheduled_posts_from_modal(session, open_scheduled_posts=open_scheduled_posts)
+    if modal_posts is not None:
+        return {"scheduled_posts": modal_posts}
+
     cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
     scheduled_posts = []
-    for index in range(1, len(cards) + 1):
-        cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
-        post = _scheduled_post_from_card(index, cards[index - 1])
-        detail_content = _scheduled_post_detail_content(session, index, open_scheduled_posts=open_scheduled_posts)
-        if detail_content:
-            post["content"] = detail_content
+    for index, card in enumerate(cards, start=1):
+        post = _scheduled_post_from_card(index, card)
+        if not post.get("content"):
+            detail_content = _scheduled_post_detail_content(session, index, open_scheduled_posts=open_scheduled_posts)
+            if detail_content:
+                post["content"] = detail_content
         scheduled_posts.append(post)
     return {"scheduled_posts": scheduled_posts}
 
 
 def _open_scheduled_posts(session: "LinkedInSession") -> None:
     session.ensure_browser()
+    if _scheduled_posts_modal_ready(session):
+        return
     goto_page(
         session,
         action=lambda: session.page.goto(
@@ -808,6 +814,104 @@ def _open_scheduled_posts(session: "LinkedInSession") -> None:
         error_message="Failed to open feed management",
     )
     session.wait(2.0, 4.0)
+    _wait_for_scheduled_posts_modal(session)
+
+
+def _scheduled_posts_modal_ready(session: "LinkedInSession") -> bool:
+    if "/feed/" not in session.page.url or "view=management" not in session.page.url:
+        return False
+    for dialog in _visible_scheduled_post_dialogs(session):
+        if _scheduled_posts_from_dialog(dialog) is not None:
+            return True
+    return False
+
+
+def _wait_for_scheduled_posts_modal(session: "LinkedInSession", *, timeout_ms: int = 8_000) -> bool:
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if _scheduled_posts_modal_ready(session):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _visible_scheduled_post_dialogs(session: "LinkedInSession") -> list:
+    dialogs = []
+    seen = set()
+    for dialog in session.page.locator(SELECTORS["composer"]).all():
+        if not dialog.is_visible():
+            continue
+        handle = dialog.element_handle()
+        if not handle:
+            continue
+        key = handle.evaluate("el => el.outerHTML.slice(0, 500)")
+        if key in seen:
+            continue
+        text = dialog.inner_text().strip()
+        if "Scheduled posts" not in text:
+            continue
+        if "Posting " not in text and "No scheduled posts yet" not in text:
+            continue
+        seen.add(key)
+        dialogs.append(dialog)
+    return dialogs
+
+
+def _scheduled_posts_from_modal(session: "LinkedInSession", open_scheduled_posts=None) -> list[dict] | None:
+    (open_scheduled_posts or _open_scheduled_posts)(session)
+    for dialog in _visible_scheduled_post_dialogs(session):
+        posts = _scheduled_posts_from_dialog(dialog)
+        if posts is not None:
+            return posts
+    return None
+
+
+def _scheduled_posts_from_dialog(dialog) -> list[dict] | None:
+    text = dialog.inner_text().strip()
+    lines = _text_lines(text)
+    if "Scheduled posts" not in lines:
+        return None
+    if "No scheduled posts yet" in lines:
+        return []
+    posts = []
+    current: dict | None = None
+    body: list[str] = []
+    for line in lines:
+        if line in {"Dialog content start.", "Dialog content end.", "Scheduled posts"}:
+            continue
+        if line.startswith("Posting "):
+            if current:
+                current["content"] = "\n".join(body).strip() or None
+                posts.append(current)
+            current = {
+                "index": len(posts) + 1,
+                "activity_id": None,
+                "scheduled_at": _scheduled_at_from_posting_line(line),
+                "scheduled_label": _scheduled_preview_label(dialog, len(posts)),
+                "content": None,
+            }
+            body = []
+            continue
+        if line.startswith("Actions menu for scheduled post"):
+            continue
+        if current:
+            body.append(line)
+    if current:
+        current["content"] = "\n".join(body).strip() or None
+        posts.append(current)
+    return posts
+
+
+def _scheduled_at_from_posting_line(line: str) -> str | None:
+    match = re.search(r"posting\s+(.+)", line, flags=re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def _scheduled_preview_label(dialog, index: int) -> str | None:
+    previews = [item for item in dialog.locator(SELECTORS["scheduled_post_preview"]).all() if item.is_visible()]
+    if index >= len(previews):
+        return None
+    return previews[index].get_attribute("aria-label") or previews[index].inner_text().strip() or None
 
 
 def _scheduled_post_cards(session: "LinkedInSession", open_scheduled_posts=None) -> list:
@@ -990,12 +1094,7 @@ def cancel_scheduled_post(session: "LinkedInSession", index: int, open_scheduled
         raise ValueError(f"Only {len(cards)} scheduled post(s) found; index {index} is out of range")
 
     post = _scheduled_post_from_card(index, cards[index - 1])
-    actions = cards[index - 1].locator(SELECTORS["scheduled_post_actions"]).all()
-    visible_actions = [button for button in actions if button.is_visible() and button.is_enabled()]
-    if not visible_actions:
-        raise RuntimeError("Could not find scheduled post action menu")
-    visible_actions[-1].click(force=True)
-    session.wait(0.5, 1.0)
+    _open_scheduled_post_actions(session, cards[index - 1])
 
     delete_option = session.page.locator(
         '[role="menuitem"]:has-text("Delete post"), '
@@ -1012,6 +1111,44 @@ def cancel_scheduled_post(session: "LinkedInSession", index: int, open_scheduled
 
     session.wait(2.0, 4.0)
     return {"cancelled": True, **post}
+
+
+def update_scheduled_post_time(session: "LinkedInSession", index: int, scheduled_at: str, open_scheduled_posts=None) -> dict:
+    """Update the scheduled datetime for a scheduled post by 1-based index."""
+    if index < 1:
+        raise ValueError("Index must be 1-based (1 or higher)")
+    cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
+    if index > len(cards):
+        raise ValueError(f"Only {len(cards)} scheduled post(s) found; index {index} is out of range")
+
+    post = _scheduled_post_from_card(index, cards[index - 1])
+    _open_scheduled_post_actions(session, cards[index - 1])
+
+    edit_option = session.page.locator(
+        '[role="menuitem"]:has-text("Edit post"), '
+        '.artdeco-dropdown__content:visible [aria-label="Edit post"], '
+        '.artdeco-dropdown__content:visible button:has-text("Edit")'
+    ).first
+    if not edit_option.is_visible():
+        raise RuntimeError("Could not find 'Edit post' option in scheduled post actions menu")
+    edit_option.click(force=True)
+    session.wait(1.0, 2.0)
+
+    _schedule_time(session, scheduled_at)
+    if not _click_dialog_button(session, ["Save", "Post", "Schedule"], timeout_ms=8_000):
+        raise RuntimeError("Could not save updated scheduled post time")
+
+    session.wait(2.0, 4.0)
+    return {**post, "updated": True, "previous_scheduled_at": post.get("scheduled_at"), "scheduled_at": scheduled_at}
+
+
+def _open_scheduled_post_actions(session: "LinkedInSession", card) -> None:
+    actions = card.locator(SELECTORS["scheduled_post_actions"]).all()
+    visible_actions = [button for button in actions if button.is_visible() and button.is_enabled()]
+    if not visible_actions:
+        raise RuntimeError("Could not find scheduled post action menu")
+    visible_actions[-1].click(force=True)
+    session.wait(0.5, 1.0)
 
 
 def _open_comment(session: "LinkedInSession", post_id_or_url: str, comment_id: str | None = None) -> dict:

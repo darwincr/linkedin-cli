@@ -474,6 +474,14 @@ def cancel_page_scheduled_post(session: "LinkedInSession", company_id: str, inde
     return {"company_id": company_id, **result}
 
 
+def update_page_scheduled_post_time(session: "LinkedInSession", company_id: str, index: int, scheduled_at: str) -> dict:
+    """Update the scheduled datetime for a company page post by 1-based index."""
+    from linkedin_cli.actions.posts import update_scheduled_post_time
+
+    result = update_scheduled_post_time(session, index, scheduled_at, open_scheduled_posts=lambda s: _open_page_scheduled_posts(s, company_id))
+    return {"company_id": company_id, **result}
+
+
 def delete_page_post(session: "LinkedInSession", company_id: str, post_id_or_url: str) -> dict:
     """Delete a company page post by opening it and using the visible admin menu."""
     session.ensure_browser()
