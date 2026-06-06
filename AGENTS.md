@@ -57,6 +57,13 @@ Show jobs command help:
 uv run python -m linkedin_cli.cli jobs --help
 ```
 
+Show posts and company page command help:
+
+```bash
+uv run python -m linkedin_cli.cli posts --help
+uv run python -m linkedin_cli.cli page --help
+```
+
 List saved jobs from the live authenticated browser:
 
 ```bash
@@ -73,6 +80,18 @@ Show a job by ID:
 
 ```bash
 uv run python -m linkedin_cli.cli jobs show 4380431768 --session work --json
+```
+
+Discover company pages administered by the live session:
+
+```bash
+uv run python -m linkedin_cli.cli page list --session work --json
+```
+
+List published company page posts:
+
+```bash
+uv run python -m linkedin_cli.cli page posts 112454418 --session work --json
 ```
 
 Syntax-check a changed file:
@@ -102,6 +121,10 @@ Safe read-only examples:
 ```bash
 uv run python -m linkedin_cli.cli jobs saved --session work --json
 uv run python -m linkedin_cli.cli jobs show 4380431768 --session work --json
+uv run python -m linkedin_cli.cli posts show <activity-id> --session work --json
+uv run python -m linkedin_cli.cli page list --session work --json
+uv run python -m linkedin_cli.cli page posts 112454418 --session work --json
+uv run python -m linkedin_cli.cli page inbox 112454418 --session work --json
 ```
 
 Potentially destructive commands require explicit user approval before running:
@@ -112,13 +135,22 @@ uv run python -m linkedin_cli.cli jobs unsave <job-id> --session work --json
 uv run python -m linkedin_cli.cli jobs apply <job-id> --session work --json
 uv run python -m linkedin_cli.cli connect <profile-id> --session work --json
 uv run python -m linkedin_cli.cli message <profile-id> --text "..." --session work --json
+uv run python -m linkedin_cli.cli posts create --text "..." --session work --json
+uv run python -m linkedin_cli.cli posts delete <activity-id> --session work --json
+uv run python -m linkedin_cli.cli posts react <activity-id> --session work --json
+uv run python -m linkedin_cli.cli page post-create 112454418 --text "..." --session work --json
+uv run python -m linkedin_cli.cli page post-delete 112454418 <activity-id> --session work --json
+uv run python -m linkedin_cli.cli page reply 112454418 <thread-id> --text "..." --session work --json
 ```
+
+Temporary create/delete tests are allowed only after the user approves the specific action. Use clearly marked temporary content and delete it immediately after verification.
 
 When testing DOM selectors directly, attach to the recorded session rather than launching a new browser. Use the project session helpers and keep tests read-only unless approved.
 
 ## Notes For Agents
 
 - Work from the UV-managed checkout, not a stale copy elsewhere.
+- When using the CLI, always read `llms.txt` first. It is the compact, current command/JSON contract for agents, including available verbs, arguments, read-only vs destructive behavior, and output shapes.
 - Use `uv run python -m linkedin_cli.cli ...` instead of bare `python` or a global `linkedin-cli`.
 - The live LinkedIn pages can change. Verify selectors against the authenticated browser before considering browser automation changes complete.
 - The session lock exists to prevent concurrent automation from fighting over the same browser. Avoid parallel live-browser commands against the same session.

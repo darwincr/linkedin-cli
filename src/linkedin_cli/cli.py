@@ -34,6 +34,8 @@ import os
 import signal
 import sys
 
+REACTION_CHOICES = ["like", "celebrate", "support", "love", "insightful", "funny"]
+
 from linkedin_cli.enums import ProfileState
 from linkedin_cli.exceptions import (
     AuthenticationError,
@@ -201,6 +203,130 @@ def _human_jobs_apply(result: dict) -> str:
     return "manual apply required"
 
 
+def _human_posts(result: dict) -> str:
+    posts = result.get("posts") or []
+    if not posts:
+        return "(no posts)"
+    header = f"{len(posts)} post(s) on page {result.get('page', 1)}:"
+    return "\n".join(
+        [header] + [
+            "  " + " — ".join(x for x in (
+                p.get("activity_id"),
+                p.get("author"),
+                (p.get("content") or "").splitlines()[0][:80] if p.get("content") else None,
+            ) if x)
+            for p in posts
+        ]
+    )
+
+
+def _human_post(result: dict) -> str:
+    engagement = result.get("engagement") or {}
+    lines = [" — ".join(x for x in (result.get("activity_id"), result.get("author")) if x)]
+    if result.get("content"):
+        lines.append(result["content"])
+    lines.append(
+        " · ".join(
+            f"{engagement.get(key) or 0} {key}"
+            for key in ("reactions", "comments", "reposts")
+        )
+    )
+    lines.append("(--json for the full record)")
+    return "\n".join(line for line in lines if line)
+
+
+def _human_comments(result: dict) -> str:
+    comments = result.get("comments") or []
+    if not comments:
+        return "(no comments)"
+    lines = [f"{len(comments)} comment(s):"]
+    for comment in comments:
+        lines.append("  " + " — ".join(x for x in (comment.get("comment_id"), comment.get("author"), comment.get("text")) if x)[:180])
+    return "\n".join(lines)
+
+
+def _human_post_write(result: dict) -> str:
+    if result.get("posted"):
+        return "posted"
+    if result.get("drafted"):
+        return "draft saved"
+    if result.get("scheduled"):
+        return f"scheduled for {result.get('scheduled_at')}"
+    if result.get("deleted"):
+        return "deleted"
+    if result.get("replied"):
+        return "replied"
+    if result.get("reacted"):
+        return f"reacted: {result.get('reaction')}"
+    return "not completed"
+
+
+def _human_notifications(result: dict) -> str:
+    notifications = result.get("notifications") or []
+    if not notifications:
+        return "(no notifications)"
+    lines = [f"{len(notifications)} notification(s):"]
+    for item in notifications:
+        marker = "unread" if item.get("unread") else "read"
+        text = item.get("text") or ""
+        lines.append(f"  [{marker}] {text[:160]}")
+    return "\n".join(lines)
+
+
+def _human_page_posts(result: dict) -> str:
+    posts = result.get("posts") or []
+    if not posts:
+        return "(no page posts)"
+    header = f"{len(posts)} page post(s) in {result.get('tab', 'published')}:"
+    return "\n".join(
+        [header] + [
+            "  " + " — ".join(x for x in (
+                p.get("activity_id"),
+                (p.get("content") or "").splitlines()[0][:100] if p.get("content") else None,
+            ) if x)
+            for p in posts
+        ]
+    )
+
+
+def _human_page_list(result: dict) -> str:
+    pages = result.get("pages") or []
+    if not pages:
+        return "(no admin pages found)"
+    return "\n".join([f"{len(pages)} admin page(s):"] + [
+        "  " + " — ".join(x for x in (p.get("company_id"), p.get("name"), p.get("admin_url")) if x)
+        for p in pages
+    ])
+
+
+def _human_page_post_write(result: dict) -> str:
+    if result.get("posted"):
+        return "posted"
+    if result.get("deleted"):
+        return "deleted"
+    return "not completed"
+
+
+def _human_page_inbox(result: dict) -> str:
+    threads = result.get("threads") or []
+    if not threads:
+        return "(no inbox threads)"
+    return "\n".join([f"{len(threads)} thread(s):"] + [
+        "  " + " — ".join(x for x in (t.get("thread_id"), t.get("summary")) if x)[:180]
+        for t in threads
+    ])
+
+
+def _human_page_thread(result: dict) -> str:
+    messages = result.get("messages") or []
+    if not messages:
+        return "(no messages)"
+    return "\n".join(
+        f"{m.get('sender', '')}: {m.get('text', '')}"
+        for m in messages
+    )
+
+
 def _human_closed(result: dict) -> str:
     return f"closed {result.get('name')}"
 
@@ -220,6 +346,28 @@ _HUMAN = {
     "jobs-save": _human_jobs_save,
     "jobs-unsave": _human_jobs_save,
     "jobs-apply": _human_jobs_apply,
+    "posts-profile": _human_posts,
+    "posts-show": _human_post,
+    "posts-engagement": _human_post,
+    "posts-comments": _human_comments,
+    "posts-create": _human_post_write,
+    "posts-draft": _human_post_write,
+    "posts-schedule": _human_post_write,
+    "posts-delete": _human_post_write,
+    "posts-comment-reply": _human_post_write,
+    "posts-react": _human_post_write,
+    "posts-comment-react": _human_post_write,
+    "notifications": _human_notifications,
+    "notifications-reply": _human_post_write,
+    "notifications-react": _human_post_write,
+    "page-list": _human_page_list,
+    "page-posts": _human_page_posts,
+    "page-post": _human_post,
+    "page-post-create": _human_page_post_write,
+    "page-post-delete": _human_page_post_write,
+    "page-inbox": _human_page_inbox,
+    "page-thread": _human_page_thread,
+    "page-reply": _human_sent,
     "session-close": _human_closed,
 }
 
@@ -300,15 +448,15 @@ def _verb_message(session, args) -> dict:
     from linkedin_cli.actions.message import send_raw_message
 
     profile = _scrape(session, args.handle)
-    sent = send_raw_message(session, profile, args.text)
-    return {"public_identifier": profile.get("public_identifier"), "sent": sent}
+    sent = send_raw_message(session, profile, args.text, attachments=args.attachment)
+    return {"public_identifier": profile.get("public_identifier"), "sent": sent, "attachments": args.attachment}
 
 
 def _verb_thread(session, args) -> dict:
     from linkedin_cli.actions.conversations import get_conversation
 
     profile = _scrape(session, args.handle)
-    messages = get_conversation(session, profile.get("urn"), session.self_profile["urn"])
+    messages = get_conversation(session, profile.get("urn"), session.self_profile["urn"], limit=args.limit)
     return {"public_identifier": profile.get("public_identifier"), "messages": messages}
 
 
@@ -364,6 +512,153 @@ def _verb_jobs_apply(session, args) -> dict:
     return apply_job(session, args.job, submit=args.submit)
 
 
+def _verb_posts_profile(session, args) -> dict:
+    from linkedin_cli.actions.posts import profile_posts
+
+    return profile_posts(session, args.handle, page=args.page, limit=args.limit)
+
+
+def _verb_posts_show(session, args) -> dict:
+    from linkedin_cli.actions.posts import show_post
+
+    return show_post(session, args.post)
+
+
+def _verb_posts_engagement(session, args) -> dict:
+    from linkedin_cli.actions.posts import post_engagement
+
+    return post_engagement(session, args.post)
+
+
+def _verb_posts_comments(session, args) -> dict:
+    from linkedin_cli.actions.posts import list_post_comments
+
+    return list_post_comments(session, args.post, limit=args.limit)
+
+
+def _verb_posts_create(session, args) -> dict:
+    from linkedin_cli.actions.posts import create_post
+
+    return create_post(
+        session,
+        args.text,
+        images=args.image,
+        documents=args.document,
+        poll_question=args.poll_question,
+        poll_options=args.poll_option,
+    )
+
+
+def _verb_posts_draft(session, args) -> dict:
+    from linkedin_cli.actions.posts import draft_post
+
+    return draft_post(session, args.text)
+
+
+def _verb_posts_schedule(session, args) -> dict:
+    from linkedin_cli.actions.posts import schedule_post
+
+    return schedule_post(session, args.text, args.at)
+
+
+def _verb_posts_delete(session, args) -> dict:
+    from linkedin_cli.actions.posts import delete_post
+
+    return delete_post(session, args.post)
+
+
+def _verb_posts_comment_reply(session, args) -> dict:
+    from linkedin_cli.actions.posts import reply_to_comment
+
+    return reply_to_comment(session, args.post, comment_id=args.comment_id, author=args.author, text=args.text)
+
+
+def _verb_posts_react(session, args) -> dict:
+    from linkedin_cli.actions.posts import react_to_post
+
+    return react_to_post(session, args.post, reaction=args.reaction)
+
+
+def _verb_posts_comment_react(session, args) -> dict:
+    from linkedin_cli.actions.posts import react_to_comment
+
+    return react_to_comment(session, args.post, comment_id=args.comment_id, author=args.author, reaction=args.reaction)
+
+
+def _verb_notifications(session, args) -> dict:
+    from linkedin_cli.actions.notifications import list_notifications
+
+    return list_notifications(session, limit=args.limit)
+
+
+def _verb_notifications_reply(session, args) -> dict:
+    from linkedin_cli.actions.notifications import reply_to_notification
+
+    return reply_to_notification(session, index=args.index, text=args.text)
+
+
+def _verb_notifications_react(session, args) -> dict:
+    from linkedin_cli.actions.notifications import react_to_notification
+
+    return react_to_notification(session, index=args.index, reaction=args.reaction)
+
+
+def _verb_page_posts(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import list_page_posts
+
+    return list_page_posts(session, args.company, limit=args.limit)
+
+
+def _verb_page_list(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import list_admin_pages
+
+    return list_admin_pages(session)
+
+
+def _verb_page_post(session, args) -> dict:
+    from linkedin_cli.actions.posts import show_post
+
+    return show_post(session, args.post)
+
+
+def _verb_page_post_create(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import create_page_post
+
+    return create_page_post(
+        session,
+        args.company,
+        args.text,
+        images=args.image,
+        documents=args.document,
+        poll_question=args.poll_question,
+        poll_options=args.poll_option,
+    )
+
+
+def _verb_page_post_delete(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import delete_page_post
+
+    return delete_page_post(session, args.company, args.post)
+
+
+def _verb_page_inbox(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import list_page_inbox
+
+    return list_page_inbox(session, args.company, limit=args.limit)
+
+
+def _verb_page_thread(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import page_inbox_thread
+
+    return page_inbox_thread(session, args.company, args.thread, limit=args.limit)
+
+
+def _verb_page_reply(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import reply_page_inbox_thread
+
+    return reply_page_inbox_thread(session, args.company, args.thread, args.text, attachments=args.attachment)
+
+
 _VERBS = {
     "login": _verb_login,
     "whoami": _verb_whoami,
@@ -379,6 +674,28 @@ _VERBS = {
     "jobs-save": _verb_jobs_save,
     "jobs-unsave": _verb_jobs_unsave,
     "jobs-apply": _verb_jobs_apply,
+    "posts-profile": _verb_posts_profile,
+    "posts-show": _verb_posts_show,
+    "posts-engagement": _verb_posts_engagement,
+    "posts-comments": _verb_posts_comments,
+    "posts-create": _verb_posts_create,
+    "posts-draft": _verb_posts_draft,
+    "posts-schedule": _verb_posts_schedule,
+    "posts-delete": _verb_posts_delete,
+    "posts-comment-reply": _verb_posts_comment_reply,
+    "posts-react": _verb_posts_react,
+    "posts-comment-react": _verb_posts_comment_react,
+    "notifications": _verb_notifications,
+    "notifications-reply": _verb_notifications_reply,
+    "notifications-react": _verb_notifications_react,
+    "page-list": _verb_page_list,
+    "page-posts": _verb_page_posts,
+    "page-post": _verb_page_post,
+    "page-post-create": _verb_page_post_create,
+    "page-post-delete": _verb_page_post_delete,
+    "page-inbox": _verb_page_inbox,
+    "page-thread": _verb_page_thread,
+    "page-reply": _verb_page_reply,
 }
 
 
@@ -481,14 +798,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("connect", parents=[common],
                    help="Send a connection request (no note); no-op if already Connected or Pending"
                    ).add_argument("handle", help=handle_help)
-    sub.add_parser("thread", parents=[common],
-                   help="Dump the conversation with the member as a list of messages (newest last)"
-                   ).add_argument("handle", help=handle_help)
+    p_thread = sub.add_parser("thread", parents=[common],
+                              help="Dump the conversation with the member as a list of messages (newest last)")
+    p_thread.add_argument("handle", help=handle_help)
+    p_thread.add_argument("--limit", type=int, default=50, help="Maximum messages to return (default: 50)")
 
     p_message = sub.add_parser("message", parents=[common],
                                help="Send a direct message to the member")
     p_message.add_argument("handle", help=handle_help)
     p_message.add_argument("--text", required=True, help="Message body to send")
+    p_message.add_argument("--attachment", action="append", default=[], help="File to attach (repeatable)")
 
     p_search = sub.add_parser("search", parents=[common],
                               help="Search People by keyword; list matching profile handles")
@@ -520,6 +839,107 @@ def build_parser() -> argparse.ArgumentParser:
     p_jobs_apply = jobs_sub.add_parser("apply", parents=[common], help="Start or submit an Easy Apply job application")
     p_jobs_apply.add_argument("job", help=jobs_handle_help)
     p_jobs_apply.add_argument("--submit", action="store_true", help="Submit only if the first Easy Apply dialog is immediately ready")
+
+    posts_cmd = sub.add_parser("posts", help="Read LinkedIn posts, content, and engagement without creating or engaging")
+    posts_sub = posts_cmd.add_subparsers(dest="posts_cmd", required=True)
+
+    p_posts_profile = posts_sub.add_parser("profile", parents=[common], help="List visible recent posts for a member profile")
+    p_posts_profile.add_argument("handle", help=handle_help)
+    p_posts_profile.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
+    p_posts_profile.add_argument("--limit", type=int, default=10, help="Maximum visible posts to return (default: 10)")
+
+    posts_handle_help = "LinkedIn activity id, activity/share URN, or /feed/update/... URL"
+    posts_sub.add_parser("show", parents=[common], help="Show visible post content and aggregate engagement").add_argument("post", help=posts_handle_help)
+    posts_sub.add_parser("engagement", parents=[common], help="Show aggregate engagement and visible comments for a post").add_argument("post", help=posts_handle_help)
+
+    p_posts_comments = posts_sub.add_parser("comments", parents=[common], help="List visible comments for a post")
+    p_posts_comments.add_argument("post", help=posts_handle_help)
+    p_posts_comments.add_argument("--limit", type=int, default=20, help="Maximum visible comments to return (default: 20)")
+
+    p_posts_create = posts_sub.add_parser("create", parents=[common], help="Create a LinkedIn post with optional images, documents, or a poll")
+    p_posts_create.add_argument("--text", required=True, help="Post body text")
+    p_posts_create.add_argument("--image", action="append", default=[], help="Image file to attach (repeatable)")
+    p_posts_create.add_argument("--document", action="append", default=[], help="Document file to attach (repeatable)")
+    p_posts_create.add_argument("--poll-question", help="Poll question; defaults to the post text when LinkedIn requires one")
+    p_posts_create.add_argument("--poll-option", action="append", default=[], help="Poll option (repeat at least twice to create a poll)")
+
+    p_posts_draft = posts_sub.add_parser("draft", parents=[common], help="Write a post, close the composer, and save LinkedIn's draft prompt")
+    p_posts_draft.add_argument("--text", required=True, help="Draft body text")
+
+    p_posts_schedule = posts_sub.add_parser("schedule", parents=[common], help="Schedule a text post for a specific local datetime")
+    p_posts_schedule.add_argument("--text", required=True, help="Post body text")
+    p_posts_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
+
+    posts_sub.add_parser("delete", parents=[common], help="Delete a LinkedIn post by id, URN, or URL").add_argument("post", help=posts_handle_help)
+
+    p_posts_comment_reply = posts_sub.add_parser("comment-reply", parents=[common], help="Reply to a visible comment on a post")
+    p_posts_comment_reply.add_argument("post", help="Post id/URL or full comment URL")
+    p_posts_comment_reply.add_argument("--comment-id", help="LinkedIn comment id when post is not a full comment URL")
+    p_posts_comment_reply.add_argument("--author", help="Visible comment author to target, e.g. 'Yanca Ranzone'")
+    p_posts_comment_reply.add_argument("--text", required=True, help="Reply body text")
+
+    p_posts_react = posts_sub.add_parser("react", parents=[common], help="React to a post")
+    p_posts_react.add_argument("post", help=posts_handle_help)
+    p_posts_react.add_argument("--reaction", default="like", choices=REACTION_CHOICES, help="Reaction type (default: like)")
+
+    p_posts_comment_react = posts_sub.add_parser("comment-react", parents=[common], help="React to a visible comment on a post")
+    p_posts_comment_react.add_argument("post", help="Post id/URL or full comment URL")
+    p_posts_comment_react.add_argument("--comment-id", help="LinkedIn comment id when post is not a full comment URL")
+    p_posts_comment_react.add_argument("--author", help="Visible comment author to target, e.g. 'Yanca Ranzone'")
+    p_posts_comment_react.add_argument("--reaction", default="like", choices=REACTION_CHOICES, help="Reaction type (default: like)")
+
+    p_notifications = sub.add_parser("notifications", parents=[common], help="List visible LinkedIn notifications")
+    p_notifications.add_argument("--limit", type=int, default=20, help="Maximum visible notifications to return (default: 20)")
+    notifications_sub = p_notifications.add_subparsers(dest="notifications_cmd")
+
+    p_notifications_reply = notifications_sub.add_parser("reply", parents=[common], help="Reply to the comment referenced by a visible notification")
+    p_notifications_reply.add_argument("--index", type=int, required=True, help="1-based notification index from the visible notifications list")
+    p_notifications_reply.add_argument("--text", required=True, help="Reply body text")
+
+    p_notifications_react = notifications_sub.add_parser("react", parents=[common], help="React to the post or comment referenced by a visible notification")
+    p_notifications_react.add_argument("--index", type=int, required=True, help="1-based notification index from the visible notifications list")
+    p_notifications_react.add_argument("--reaction", default="like", choices=REACTION_CHOICES, help="Reaction type (default: like)")
+
+    page_cmd = sub.add_parser("page", help="Manage a LinkedIn company page as an admin")
+    page_sub = page_cmd.add_subparsers(dest="page_cmd", required=True)
+    company_help = "LinkedIn company numeric id, e.g. 112454418"
+
+    page_sub.add_parser("list", parents=[common], help="List company pages this session can administer")
+
+    p_page_posts = page_sub.add_parser("posts", parents=[common], help="List company page admin posts")
+    p_page_posts.add_argument("company", help=company_help)
+    p_page_posts.add_argument("--limit", type=int, default=10, help="Maximum visible posts to return (default: 10)")
+
+    p_page_post = page_sub.add_parser("post", parents=[common], help="Show one company page post by activity id or URL")
+    p_page_post.add_argument("company", help=company_help)
+    p_page_post.add_argument("post", help=posts_handle_help)
+
+    p_page_post_create = page_sub.add_parser("post-create", parents=[common], help="Create a text post as a company page admin")
+    p_page_post_create.add_argument("company", help=company_help)
+    p_page_post_create.add_argument("--text", required=True, help="Post body text")
+    p_page_post_create.add_argument("--image", action="append", default=[], help="Image file to attach (repeatable)")
+    p_page_post_create.add_argument("--document", action="append", default=[], help="Document file to attach (repeatable)")
+    p_page_post_create.add_argument("--poll-question", help="Poll question; defaults to the post text when LinkedIn requires one")
+    p_page_post_create.add_argument("--poll-option", action="append", default=[], help="Poll option (repeat at least twice to create a poll)")
+
+    p_page_post_delete = page_sub.add_parser("post-delete", parents=[common], help="Delete a company page post by activity id or URL")
+    p_page_post_delete.add_argument("company", help=company_help)
+    p_page_post_delete.add_argument("post", help=posts_handle_help)
+
+    p_page_inbox = page_sub.add_parser("inbox", parents=[common], help="List visible company page inbox threads")
+    p_page_inbox.add_argument("company", help=company_help)
+    p_page_inbox.add_argument("--limit", type=int, default=20, help="Maximum visible threads to return (default: 20)")
+
+    p_page_thread = page_sub.add_parser("thread", parents=[common], help="Show visible messages in a company page inbox thread")
+    p_page_thread.add_argument("company", help=company_help)
+    p_page_thread.add_argument("thread", help="Page inbox thread id or URL")
+    p_page_thread.add_argument("--limit", type=int, default=50, help="Maximum visible messages to return (default: 50)")
+
+    p_page_reply = page_sub.add_parser("reply", parents=[common], help="Reply to a company page inbox thread")
+    p_page_reply.add_argument("company", help=company_help)
+    p_page_reply.add_argument("thread", help="Page inbox thread id or URL")
+    p_page_reply.add_argument("--text", required=True, help="Reply body text")
+    p_page_reply.add_argument("--attachment", action="append", default=[], help="File to attach (repeatable)")
     return parser
 
 
@@ -536,7 +956,16 @@ def main(argv=None) -> int:
     if args.cmd == "session":
         return _cmd_session_open(args) if args.subcmd == "open" else _cmd_session_close(args)
 
-    args.verb = f"jobs-{args.jobs_cmd}" if args.cmd == "jobs" else args.cmd
+    if args.cmd == "jobs":
+        args.verb = f"jobs-{args.jobs_cmd}"
+    elif args.cmd == "posts":
+        args.verb = f"posts-{args.posts_cmd}"
+    elif args.cmd == "page":
+        args.verb = f"page-{args.page_cmd}"
+    elif args.cmd == "notifications" and args.notifications_cmd:
+        args.verb = f"notifications-{args.notifications_cmd}"
+    else:
+        args.verb = args.cmd
     return _run_verb(args)
 
 

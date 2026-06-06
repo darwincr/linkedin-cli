@@ -1,5 +1,6 @@
 # linkedin/actions/message.py
 import logging
+import time
 from typing import Dict, Any
 
 from playwright.sync_api import Error as PlaywrightError, Locator
@@ -39,6 +40,11 @@ SELECTOR_CHAINS = {
         'form button[type="submit"]',
         'button[type="submit"]',
     ],
+    "attach_button": [
+        'button[aria-label*="Attach" i]',
+        'button[aria-label*="Add attachment" i]',
+        'button[title*="Attach" i]',
+    ],
 }
 
 
@@ -63,22 +69,23 @@ def _find(page, key: str, timeout: int = 5000) -> Locator:
 # ── Public entry point ────────────────────────────────────────────
 
 
-def send_raw_message(session, profile: Dict[str, Any], message: str) -> bool:
+def send_raw_message(session, profile: Dict[str, Any], message: str, *, attachments: list[str] | None = None) -> bool:
     """Send an arbitrary message to a profile. Returns True if sent."""
     public_identifier = profile.get("public_identifier")
+    attachments = attachments or []
 
-    if _send_message(session, profile, message):
+    if _send_message(session, profile, message, attachments=attachments):
         return True
     dump_page_html(session, profile, category="message_direct")
 
-    if _send_message_via_api(session, profile, message):
+    if not attachments and _send_message_via_api(session, profile, message):
         return True
 
     logger.error("All send methods failed for %s", public_identifier)
     return False
 
 
-def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
+def _send_message(session, profile: Dict[str, Any], message: str, *, attachments: list[str] | None = None) -> bool:
     """Navigate to /messaging/thread/new/?recipient=<urn>, compose, send.
 
     Uses the target URN (promoted to its own Lead column in crm.0005) to
@@ -110,6 +117,7 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
             min_delay=10,
             max_delay=50,
         )
+        _attach_files(session, attachments or [])
         _find(session.page, "compose_send").first.click(delay=200)
         session.wait(0.5, 1)
         logger.info("Message sent to %s (direct thread)", public_identifier)
@@ -117,6 +125,35 @@ def _send_message(session, profile: Dict[str, Any], message: str) -> bool:
     except (PlaywrightError, TimeoutError) as e:
         logger.error("Failed to send message to %s (direct thread) → %s", public_identifier, e)
         return False
+
+
+def _attach_files(session, files: list[str]) -> bool:
+    if not files:
+        return False
+    from linkedin_cli.actions.posts import _existing_paths
+
+    paths = _existing_paths(files)
+    page = session.page
+    try:
+        inputs = page.locator('input[type="file"]')
+        if inputs.count() > 0:
+            inputs.last.set_input_files(paths)
+        else:
+            with page.expect_file_chooser(timeout=5_000) as chooser_info:
+                _find(page, "attach_button", timeout=5_000).first.click(force=True)
+            chooser_info.value.set_files(paths)
+    except PlaywrightError:
+        with page.expect_file_chooser(timeout=5_000) as chooser_info:
+            _find(page, "attach_button", timeout=5_000).first.click(force=True)
+        chooser_info.value.set_files(paths)
+
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        send = _find(page, "compose_send", timeout=1_000).first
+        if send.is_enabled():
+            return True
+        session.wait(0.5, 1.0)
+    return True
 
 
 def _send_message_via_api(session, profile: Dict[str, Any], message: str) -> bool:

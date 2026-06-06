@@ -2,8 +2,8 @@
 
 > A command-line tool and Python library that drives LinkedIn through a real,
 > logged-in browser (Playwright) and LinkedIn's private Voyager API. It is meant
-> to be used by LLM agents as a deterministic tool: every command takes a public
-> profile handle and emits a single JSON object on stdout. Logs and errors go to
+> to be used by LLM agents as a deterministic tool: every command emits a single
+> JSON object on stdout with `--json`. Logs and errors go to
 > stderr. There is no API key, no SaaS, and no database — it drives the user's own
 > LinkedIn account on the user's own machine.
 
@@ -23,8 +23,15 @@ linkedin-cli session close                 # stop the session
 ```
 
 An `<id>` argument is a public handle (e.g. `alice-smith`) or a profile URL.
-Commands are independent and stateless; the only thing an agent threads between
-steps is the handle.
+A `<job>` is a LinkedIn job id or `/jobs/view/...` URL. A `<post>` is a LinkedIn
+activity id, activity/share URN, or `/feed/update/...` URL. A comment can be
+targeted by a full comment URL or by `<post> --comment-id <id>`. Commands are
+independent and stateless; agents should thread explicit handles, job ids,
+activity ids, comment ids, or notification indexes between steps.
+
+A `<company-id>` is the numeric id in a company admin URL such as
+`https://www.linkedin.com/company/112454418/admin/`. Use `page list` to discover
+company pages the session can administer before calling company page commands.
 
 ## Commands and JSON results
 
@@ -37,8 +44,16 @@ steps is the handle.
      "location_name", "positions": [..], "educations": [..], "connection_degree" }`
 - `status <id>` → `{ "public_identifier", "state": "Connected"|"Pending"|"Qualified" }`
 - `connect <id>` → `{ "public_identifier", "state": "Pending"|"Qualified" }` (no note)
-- `message <id> --text <msg>` → `{ "public_identifier", "sent": bool }`
-- `thread <id>` → `{ "public_identifier", "messages": [ { "sender", "text", "timestamp" } ] }`
+- `message <id> --text <msg> [--attachment PATH ...]` →
+  `{ "public_identifier", "sent": bool, "attachments": [PATH] }`
+- `thread <id> [--limit N]` →
+  `{ "public_identifier", "messages": [ { "sender", "text", "timestamp", "attachments": [ { "type": "file", "name", "media_type", "byte_size", "asset_urn", "url" } ] } ] }`
+- `notifications [--limit N]` →
+  `{ "notifications": [ { "unread", "actor", "text", "url", "activity_id", "comment_id", "links" } ] }`
+- `notifications reply --index N --text <msg>` →
+  `{ "index", "notification", "activity_id", "comment_id", "replied": bool, "text" }`
+- `notifications react --index N [--reaction like|celebrate|support|love|insightful|funny]` →
+  `{ "index", "notification", "activity_id", "comment_id"?, "reaction", "reacted": bool }`
 - `jobs search <keywords> [--location <loc>] [--page N] [--easy-apply] [--remote] [--date-posted past-24h|past-week|past-month] [--job-type full-time|part-time|contract|temporary|internship]` →
   `{ "query", "location", "page", "filters", "jobs": [ { "job_id", "url", "title", "company", "location", "listed" } ] }`
 - `jobs saved [--page N]` →
@@ -49,6 +64,60 @@ steps is the handle.
 - `jobs unsave <job>` → `{ "job_id", "url", "saved": bool, "changed": bool }`
 - `jobs apply <job> [--submit]` →
   `{ "job_id", "url", "method": "external"|"easy_apply"|null, "submitted": bool, "manual": bool, "apply_url", "external_url", "ats", ... }`
+- `posts profile <id> [--page N] [--limit N]` →
+  `{ "public_identifier", "page", "posts": [ { "activity_id", "url", "author", "content", "engagement" } ] }`
+- `posts show <post>` →
+  `{ "activity_id", "url", "author", "content", "engagement" }`
+- `posts engagement <post>` →
+  `{ "activity_id", "url", "author", "content", "engagement", "comments" }`
+- `posts comments <post> [--limit N]` →
+  `{ "activity_id", "url", "comments": [ { "comment_id", "author", "profile_url", "text", "reactions" } ] }`
+- `posts create --text <text> [--image PATH] [--document PATH] [--poll-option O ...]` →
+  `{ "posted": bool, "text", "images", "documents", "poll" }`
+- `posts draft --text <text>` → `{ "drafted": bool, "text" }`
+- `posts schedule --text <text> --at YYYY-MM-DDTHH:MM` →
+  `{ "scheduled": bool, "scheduled_at", "text" }`
+- `posts delete <post>` → `{ "deleted": bool, "activity_id", "url" }`
+- `posts react <post> [--reaction like|celebrate|support|love|insightful|funny]` →
+  `{ "activity_id", "url", "reaction", "reacted": bool }`
+- `posts comment-reply <post> --comment-id C [--author A] --text <text>` →
+  `{ "activity_id", "comment_id", "author", "replied": bool, "text" }`
+- `posts comment-react <post> --comment-id C [--author A] [--reaction like|celebrate|support|love|insightful|funny]` →
+  `{ "activity_id", "comment_id", "author", "reaction", "reacted": bool }`
+- `page list` →
+  `{ "pages": [ { "company_id", "name", "admin_url" } ] }`
+- `page posts <company-id> [--limit N]` →
+  `{ "company_id", "tab": "published", "posts": [ { "activity_id", "url", "content", "engagement" } ] }`
+- `page post <company-id> <post>` →
+  `{ "activity_id", "url", "author", "content", "engagement" }`
+- `page post-create <company-id> --text <text> [--image PATH] [--document PATH] [--poll-option O ...]` →
+  `{ "company_id", "posted": bool, "text", "images", "documents", "poll", "uploaded_images", "uploaded_documents" }`
+- `page post-delete <company-id> <post>` →
+  `{ "company_id", "activity_id", "deleted": bool }`
+- `page inbox <company-id> [--limit N]` →
+  `{ "company_id", "threads": [ { "thread_id", "url", "summary" } ] }`
+- `page thread <company-id> <thread-id-or-url> [--limit N]` →
+  `{ "company_id", "thread_id", "messages": [ { "sender", "timestamp", "text", "attachments": [ { "type": "file", "name", "size", "url", "downloadable" } ] } ] }`
+- `page reply <company-id> <thread-id-or-url> --text <text> [--attachment PATH ...]` →
+  `{ "company_id", "thread_id", "sent": bool, "text", "attachments": [PATH], "attached": bool }`
+
+Messaging notes: `--attachment` is repeatable. Personal `thread` reads messages
+through Voyager and returns structured file attachments from `renderContent`.
+Company page inbox reads are DOM-based: `page inbox` and `page thread` scroll to
+load more visible threads/messages up to `--limit`, and `page thread` returns
+structured file attachments from the admin inbox attachment rows. Attachment URLs
+are LinkedIn signed URLs and may expire.
+
+Read-only commands: `whoami`, `search`, `profile`, `status`, `thread`,
+`notifications`, `jobs search`, `jobs saved`, `jobs show`, `posts profile`,
+`posts show`, `posts engagement`, `posts comments`, `page list`, `page posts`,
+`page post`, `page inbox`, `page thread`.
+
+Commands that change LinkedIn state: `connect`, `message`, `jobs save`,
+`jobs unsave`, `jobs apply --submit`, `notifications reply`, `notifications react`,
+`posts create`, `posts draft`, `posts schedule`, `posts delete`, `posts react`,
+`posts comment-reply`, `posts comment-react`, `page post-create`,
+`page post-delete`, `page reply`.
 
 ## Errors
 
@@ -58,7 +127,12 @@ Stable `type` values to branch on: `checkpoint_challenge`, `authentication`,
 
 ## Typical agent loop
 
-search → for each handle: profile and/or status → message and/or thread.
+People: search → for each handle: profile and/or status → message and/or thread.
+Engagement: notifications → reply/react by notification index, or posts comments →
+posts comment-reply/comment-react when a comment id is available.
+Company pages: page list → choose company_id → page posts/page post for read-only
+inspection; page post-create/page post-delete for page content management; page
+inbox/page thread/page reply for company page inbox workflows.
 
 ## More
 

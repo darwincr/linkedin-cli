@@ -1,7 +1,7 @@
 # linkedin-cli
 
 **Drive LinkedIn from the command line or any program** — search people and jobs,
-scrape profiles, check connection status, send connection requests, save/apply
+scrape profiles, read posts/engagement, check connection status, send connection requests, save/apply
 to jobs, and read or send messages. One small, dependency-light Python tool that talks to LinkedIn's
 private **Voyager API** through a **real, logged-in browser** (Playwright), so
 it behaves like a human session instead of a cookie-only scraper.
@@ -61,12 +61,16 @@ export LINKEDIN_PASSWORD="••••••••"
 linkedin-cli login                                    # authenticate the session
 linkedin-cli search "head of growth" --network first  # discover → handles
 linkedin-cli jobs search "software engineer" --location "United States" --remote
+linkedin-cli posts profile alice-smith --json          # read recent posts only
+linkedin-cli page list --json                         # discover company pages you administer
+linkedin-cli page posts 112454418 --json              # list company page posts
 linkedin-cli profile alice-smith                      # scrape a profile
 linkedin-cli profile alice-smith --json > alice.json  # save the full record
 linkedin-cli status  alice-smith                      # Connected / Pending / Qualified
 linkedin-cli connect alice-smith                      # send a connection request
 linkedin-cli message alice-smith --text "Hi Alice 👋"
-linkedin-cli thread  alice-smith                      # read the conversation
+linkedin-cli message alice-smith --text "Proposal attached" --attachment ./proposal.pdf
+linkedin-cli thread  alice-smith --limit 50 --json    # read messages + attachments
 
 linkedin-cli session close
 ```
@@ -86,18 +90,45 @@ so you can clear it by hand, then carry on.
 | `profile <id>` | Scrape a profile (positions, education, location, …); `--raw` adds the raw Voyager blob | full `LinkedInProfile` |
 | `status <id>` | Connection state | `{public_identifier, state}` |
 | `connect <id>` | Send a connection request (no note) | `{public_identifier, state}` |
-| `message <id> --text …` | Send a direct message | `{public_identifier, sent}` |
-| `thread <id>` | Read a conversation's messages | `{public_identifier, messages[]}` |
+| `message <id> --text … [--attachment PATH]` | Send a direct message, optionally with one or more attachments | `{public_identifier, sent, attachments[]}` |
+| `thread <id> [--limit N]` | Read a conversation's messages and structured attachments | `{public_identifier, messages[]}` |
+| `notifications [--limit N]` | List visible LinkedIn notifications; read-only | `{notifications[]}` |
+| `notifications reply --index N --text T` | Reply to the comment referenced by a visible notification | `{index, notification, replied, text}` |
+| `notifications react --index N [--reaction like/celebrate/support/love/insightful/funny]` | React to the post/comment referenced by a visible notification | `{index, notification, reaction, reacted}` |
 | `jobs search <kw> [--location L] [--page N] [--easy-apply] [--remote] [--date-posted past-24h/past-week/past-month] [--job-type full-time/part-time/contract/temporary/internship]` | Jobs search → matching job ids | `{query, location, page, filters, jobs[]}` |
 | `jobs saved [--page N]` | List saved jobs | `{page, jobs[]}` |
 | `jobs show <job>` | Show job details, saved state, and apply method | `{job_id, title, company, description, external_url, ats, ...}` |
 | `jobs save <job>` | Save a job by id or URL | `{job_id, url, saved, changed}` |
 | `jobs unsave <job>` | Unsave a job by id or URL | `{job_id, url, saved, changed}` |
 | `jobs apply <job> [--submit]` | Start an application; submit only if immediately ready | `{job_id, url, method, submitted, manual, ...}` |
+| `posts profile <id> [--page N] [--limit N]` | List visible recent posts for a member profile; read-only | `{public_identifier, page, posts[]}` |
+| `posts show <post>` | Show visible post content and aggregate engagement; read-only | `{activity_id, url, author, content, engagement}` |
+| `posts engagement <post>` | Show aggregate engagement and visible comments; read-only | `{activity_id, url, author, content, engagement, comments[]}` |
+| `posts comments <post> [--limit N]` | List visible comments for a post; read-only | `{activity_id, url, comments[]}` |
+| `posts create --text T [--image PATH] [--document PATH] [--poll-option O]` | Create a post with optional images, documents, or poll | `{posted, text, images, documents, poll}` |
+| `posts draft --text T` | Write a post, close the composer, and save LinkedIn's draft prompt | `{drafted, text}` |
+| `posts schedule --text T --at 2026-06-10T09:30` | Schedule a text post for a local datetime | `{scheduled, scheduled_at, text}` |
+| `posts delete <post>` | Delete a post by id, URN, or URL | `{deleted, activity_id, url}` |
+| `posts react <post> [--reaction like/celebrate/support/love/insightful/funny]` | React to a post | `{activity_id, reaction, reacted}` |
+| `posts comment-reply <post> --comment-id C --text T [--author A]` | Reply to a visible comment | `{activity_id, comment_id, replied, text}` |
+| `posts comment-react <post> --comment-id C [--author A] [--reaction like/celebrate/support/love/insightful/funny]` | React to a visible comment | `{activity_id, comment_id, reaction, reacted}` |
+| `page list` | Discover company pages this session can administer from the LinkedIn feed; read-only | `{pages[]}` |
+| `page posts <company-id> [--limit N]` | List visible published posts for a company page admin; read-only | `{company_id, tab, posts[]}` |
+| `page post <company-id> <post>` | Show one company page post by activity id or URL; read-only | `{activity_id, url, author, content, engagement}` |
+| `page post-create <company-id> --text T [--image PATH] [--document PATH] [--poll-option O]` | Create a company page post with optional images, documents, or poll | `{company_id, posted, text, images, documents, poll, uploaded_images, uploaded_documents}` |
+| `page post-delete <company-id> <post>` | Delete a company page post by id, URN, or URL | `{company_id, activity_id, deleted}` |
+| `page inbox <company-id> [--limit N]` | List company page inbox threads, scrolling to load more up to the limit; read-only | `{company_id, threads[]}` |
+| `page thread <company-id> <thread> [--limit N]` | Show messages and structured attachments in a company page inbox thread; read-only | `{company_id, thread_id, messages[]}` |
+| `page reply <company-id> <thread> --text T [--attachment PATH]` | Reply to a company page inbox thread, optionally with one or more attachments | `{company_id, thread_id, sent, text, attachments[], attached}` |
 
 An `<id>` is a public handle (`alice-smith`) or a full profile URL. Commands that
 need the internal member `urn` (`message`/`thread`/`status`) resolve it for you —
 every command is independent and takes only a handle.
+
+Personal messages support file attachments with repeatable `--attachment PATH`.
+`thread --json` returns each message as `{sender, text, timestamp, attachments}`.
+File attachments currently include `{type, name, media_type, byte_size, asset_urn, url}`.
+LinkedIn returns signed attachment URLs; they are useful immediately but can expire.
 
 A `<job>` is a LinkedIn job id (`4418654174`) or a full `/jobs/view/...` URL.
 External-apply jobs return LinkedIn's outbound `apply_url` plus a decoded
@@ -105,6 +136,58 @@ External-apply jobs return LinkedIn's outbound `apply_url` plus a decoded
 from the decoded host (`greenhouse`, `lever`, `workday`, `company_site`, etc.).
 Easy Apply jobs open the application flow and only submit when `--submit` is set
 and the first dialog is already ready to submit.
+
+A `<post>` is a LinkedIn activity id (`7380000000000000000`), an `urn:li:activity:...`
+or `urn:li:share:...` URN, or a full `/feed/update/...` URL. The `posts profile`,
+`posts show`, and `posts engagement` commands are read-only. The `posts create`,
+`posts draft`, `posts schedule`, `posts delete`, `posts react`, `posts comment-reply`,
+and `posts comment-react` commands change LinkedIn state.
+
+A `<company-id>` is the numeric id in a company admin URL such as
+`https://www.linkedin.com/company/112454418/admin/`. Use `page list` to discover
+company pages the bound session can administer. `page post-create` uses the same
+composer upload flow as `posts create`, including images, documents, and polls;
+LinkedIn does not allow combining polls with image/document uploads. The page
+inbox commands depend on LinkedIn's admin inbox DOM: `page inbox` scrolls the
+thread list to load more visible threads up to `--limit`, while `page thread`
+scrolls the thread to load visible message nodes up to `--limit`. `page reply`
+supports repeatable `--attachment PATH`. Company inbox messages include
+`attachments[]`; file attachments currently include `{type, name, size, url,
+downloadable}`. LinkedIn returns signed attachment URLs; they are useful
+immediately but can expire.
+
+Example company page workflow:
+
+```bash
+linkedin-cli page list --json
+linkedin-cli page posts 112454418 --json
+
+linkedin-cli page post-create 112454418 \
+  --text "Temporary image test" \
+  --image ./DeepSynergy.png \
+  --json
+
+linkedin-cli page post-delete 112454418 7468831659128274944 --json
+```
+
+Example messaging workflows:
+
+```bash
+linkedin-cli thread yanca-ranzone --limit 50 --json
+linkedin-cli message yanca-ranzone \
+  --text "Here is the file" \
+  --attachment ./pdf-invoice-example.pdf \
+  --json
+
+linkedin-cli page inbox 112454418 --limit 20 --json
+linkedin-cli page thread 112454418 2-ZjFjODRiNDYtMzdhNC00MGVlLTlhODYtMWIzNjJkMjFiNWI0XzEwMA== \
+  --limit 50 \
+  --json
+linkedin-cli page reply 112454418 2-ZjFjODRiNDYtMzdhNC00MGVlLTlhODYtMWIzNjJkMjFiNWI0XzEwMA== \
+  --text "Replying from the company page" \
+  --attachment ./pdf-invoice-example.pdf \
+  --json
+```
 
 ## 🤖 Built for AI agents (and any language)
 
@@ -153,6 +236,10 @@ The discovery → outreach loop an agent runs: **`search` → `profile` / `statu
 - **Voyager API** — reads (`profile`, `thread`, `status`) call LinkedIn's private
   Voyager endpoints from inside the authenticated page (`fetch`), then parse the
   JSON — fast and structured, no DOM scraping where an API exists.
+- **Admin inbox DOM** — company page inbox commands use LinkedIn's rendered admin
+  inbox because those page-admin flows are not exposed through the same personal
+  messaging Voyager shape. Selectors are scoped to the company inbox panel to
+  avoid LinkedIn's floating personal message overlay.
 - **Page-state auth machine** — `classify_page()` judges the live page by URL
   *path* only (so a `/login?...redirect=/feed/` URL never reads as the feed), and
   each transition asserts its pre/post state, raising on an illegal jump. Login,

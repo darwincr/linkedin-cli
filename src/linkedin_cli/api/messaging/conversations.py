@@ -26,12 +26,12 @@ def _graphql_headers(api: PlaywrightLinkedinAPI) -> dict:
     retry=retry_if_exception_type(IOError),
     reraise=True,
 )
-def fetch_conversations(api: PlaywrightLinkedinAPI, mailbox_urn: str) -> dict:
+def fetch_conversations(api: PlaywrightLinkedinAPI, mailbox_urn: str, *, count: int = 20, start: int = 0) -> dict:
     """Fetch recent conversations list. Returns raw API response."""
     url = (
         f"{_GRAPHQL_BASE}"
         f"?queryId={_CONVERSATIONS_QUERY_ID}"
-        f"&variables=(mailboxUrn:{encode_urn(mailbox_urn)})"
+        f"&variables=(mailboxUrn:{encode_urn(mailbox_urn)},count:{count},start:{start})"
     )
     res = api.get(url, headers=_graphql_headers(api))
     check_response(res, "fetch_conversations")
@@ -44,12 +44,12 @@ def fetch_conversations(api: PlaywrightLinkedinAPI, mailbox_urn: str) -> dict:
     retry=retry_if_exception_type(IOError),
     reraise=True,
 )
-def fetch_messages(api: PlaywrightLinkedinAPI, conversation_urn: str) -> dict:
+def fetch_messages(api: PlaywrightLinkedinAPI, conversation_urn: str, *, count: int = 50, start: int = 0) -> dict:
     """Fetch messages for a conversation. Returns raw API response."""
     url = (
         f"{_GRAPHQL_BASE}"
         f"?queryId={_MESSAGES_QUERY_ID}"
-        f"&variables=(conversationUrn:{encode_urn(conversation_urn)})"
+        f"&variables=(conversationUrn:{encode_urn(conversation_urn)},count:{count},start:{start})"
     )
     res = api.get(url, headers=_graphql_headers(api))
     check_response(res, "fetch_messages")

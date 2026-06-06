@@ -9,15 +9,40 @@ from linkedin_cli.api.messaging import fetch_conversations, fetch_messages, enco
 logger = logging.getLogger(__name__)
 
 
+def _file_attachment(file_data: dict) -> dict:
+    return {
+        "type": "file",
+        "name": file_data.get("name"),
+        "media_type": file_data.get("mediaType"),
+        "byte_size": file_data.get("byteSize"),
+        "asset_urn": file_data.get("assetUrn"),
+        "url": file_data.get("url"),
+    }
+
+
+def _message_attachments(msg: dict) -> list[dict]:
+    attachments = []
+    for item in msg.get("renderContent") or msg.get("renderContentUnions") or []:
+        if not isinstance(item, dict):
+            continue
+        file_data = item.get("file")
+        if isinstance(file_data, dict):
+            attachments.append(_file_attachment(file_data))
+    return attachments
+
+
 def find_conversation_urn(api: PlaywrightLinkedinAPI, target_urn: str, mailbox_urn: str) -> str | None:
     """Find conversation URN for a target profile URN by scanning recent conversations."""
-    raw = fetch_conversations(api, mailbox_urn)
-    elements = raw.get("data", {}).get("messengerConversationsBySyncToken", {}).get("elements", [])
+    for start in range(0, 100, 20):
+        raw = fetch_conversations(api, mailbox_urn, count=20, start=start)
+        batch = raw.get("data", {}).get("messengerConversationsBySyncToken", {}).get("elements", [])
+        if not batch:
+            break
 
-    for conv in elements:
-        for p in conv.get("conversationParticipants", []):
-            if p.get("hostIdentityUrn") == target_urn:
-                return conv.get("entityUrn")
+        for conv in batch:
+            for p in conv.get("conversationParticipants", []):
+                if p.get("hostIdentityUrn") == target_urn:
+                    return conv.get("entityUrn")
     return None
 
 
@@ -81,6 +106,7 @@ def parse_message_element(msg: dict) -> dict | None:
     return {
         "entityUrn": msg.get("entityUrn"),
         "text": text,
+        "attachments": _message_attachments(msg),
         "sender_name": sender_name,
         "sender_host_urn": sender.get("hostIdentityUrn", ""),
         "delivered_at": ts,
@@ -100,6 +126,7 @@ def parse_messages(raw: dict) -> list[dict]:
         messages.append({
             "sender": parsed["sender_name"],
             "text": parsed["text"],
+            "attachments": parsed["attachments"],
             "timestamp": ts.strftime("%Y-%m-%d %H:%M") if ts else "",
         })
 
@@ -107,7 +134,7 @@ def parse_messages(raw: dict) -> list[dict]:
     return messages
 
 
-def get_conversation(session, target_urn: str, mailbox_urn: str) -> list[dict] | None:
+def get_conversation(session, target_urn: str, mailbox_urn: str, *, limit: int = 50) -> list[dict] | None:
     """Retrieve past messages with a profile.
 
     Args:
@@ -119,6 +146,7 @@ def get_conversation(session, target_urn: str, mailbox_urn: str) -> list[dict] |
     """
     session.ensure_browser()
     api = PlaywrightLinkedinAPI(session=session)
+    limit = max(limit, 1)
 
     conversation_urn = find_conversation_urn(api, target_urn, mailbox_urn)
     if not conversation_urn:
@@ -128,5 +156,13 @@ def get_conversation(session, target_urn: str, mailbox_urn: str) -> list[dict] |
         logger.info("No conversation found for %s", target_urn)
         return None
 
-    raw = fetch_messages(api, conversation_urn)
-    return parse_messages(raw)
+    raw_elements = []
+    for start in range(0, max(limit, 1), 50):
+        raw = fetch_messages(api, conversation_urn, count=min(50, limit - start), start=start)
+        batch = raw.get("data", {}).get("messengerMessagesBySyncToken", {}).get("elements", [])
+        if not batch:
+            break
+        raw_elements.extend(batch)
+        if len(raw_elements) >= limit:
+            break
+    return parse_messages({"data": {"messengerMessagesBySyncToken": {"elements": raw_elements[:limit]}}})
