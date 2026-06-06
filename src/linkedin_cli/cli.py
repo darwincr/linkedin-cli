@@ -496,7 +496,13 @@ def _verb_message(session, args) -> dict:
 
 
 def _verb_thread(session, args) -> dict:
-    from linkedin_cli.actions.conversations import get_conversation
+    from linkedin_cli.actions.conversations import get_conversation, get_conversation_by_thread_id
+
+    if args.thread_id:
+        messages = get_conversation_by_thread_id(session, args.thread_id, session.self_profile["urn"], limit=args.limit)
+        return {"thread_id": args.thread_id, "messages": messages}
+    if not args.handle:
+        raise ValueError("thread requires a profile handle/URL or --thread-id")
 
     profile = _scrape(session, args.handle)
     messages = get_conversation(session, profile.get("urn"), session.self_profile["urn"], limit=args.limit)
@@ -901,8 +907,9 @@ def build_parser() -> argparse.ArgumentParser:
                              help="List recent personal messaging conversations")
     p_inbox.add_argument("--limit", type=int, default=20, help="Maximum conversations to return (default: 20)")
     p_thread = sub.add_parser("thread", parents=[common],
-                               help="Dump the conversation with the member as a list of messages (newest last)")
-    p_thread.add_argument("handle", help=handle_help)
+                                help="Dump the conversation with the member as a list of messages (newest last)")
+    p_thread.add_argument("handle", nargs="?", help=handle_help)
+    p_thread.add_argument("--thread-id", help="Personal messaging thread_id returned by inbox")
     p_thread.add_argument("--limit", type=int, default=50, help="Maximum messages to return (default: 50)")
 
     p_message = sub.add_parser("message", parents=[common],
@@ -1071,15 +1078,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _configure_logging() -> None:
-    level = os.environ.get("LINKEDIN_CLI_LOG", "INFO").upper()
+def _configure_logging(*, json_mode: bool = False) -> None:
+    default_level = "WARNING" if json_mode else "INFO"
+    level = os.environ.get("LINKEDIN_CLI_LOG", default_level).upper()
     logging.basicConfig(level=level, stream=sys.stderr,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
-    _configure_logging()
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.cmd == "thread" and not (args.handle or args.thread_id):
+        parser.error("thread requires a profile handle/URL or --thread-id")
+    _configure_logging(json_mode=getattr(args, "json", False))
 
     if args.cmd == "session":
         return _cmd_session_open(args) if args.subcmd == "open" else _cmd_session_close(args)

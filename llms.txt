@@ -48,8 +48,8 @@ company pages the session can administer before calling company page commands.
   `{ "public_identifier", "sent": bool, "attachments": [PATH] }`
 - `inbox [--limit N]` →
   `{ "conversations": [ { "thread_id", "entity_urn", "url", "participants": [ { "name", "public_identifier", "urn" } ], "last_message", "last_activity_at", "unread_count" } ] }`
-- `thread <id> [--limit N]` →
-  `{ "public_identifier", "messages": [ { "sender", "text", "timestamp", "attachments": [ { "type": "file", "name", "media_type", "byte_size", "asset_urn", "url" } ] } ] }`
+- `thread <id> [--thread-id T] [--limit N]` →
+  by profile id: `{ "public_identifier", "messages": [ { "sender", "text", "timestamp", "attachments": [ { "type": "file", "name", "media_type", "byte_size", "asset_urn", "url" } ] } ] }`; by inbox thread id: `{ "thread_id", "messages": [ ... ] }`
 - `notifications [--limit N]` →
   `{ "notifications": [ { "unread", "actor", "text", "url", "activity_id", "comment_id", "links" } ] }`
 - `notifications reply --index N --text <msg>` →
@@ -119,7 +119,8 @@ company pages the session can administer before calling company page commands.
 
 Messaging notes: `--attachment` is repeatable. Personal `inbox` lists recent
 messaging conversations through Voyager. Personal `thread` reads messages
-through Voyager and returns structured file attachments from `renderContent`.
+through Voyager by profile id, or directly by an `inbox` result's `thread_id`
+with `thread --thread-id <thread_id>`, and returns structured file attachments from `renderContent`.
 Company page inbox reads are DOM-based: `page inbox` and `page thread` scroll to
 load more visible threads/messages up to `--limit`, and `page thread` returns
 structured file attachments from the admin inbox attachment rows. Attachment URLs
@@ -145,7 +146,7 @@ Stable `type` values to branch on: `checkpoint_challenge`, `authentication`,
 ## Typical agent loop
 
 People: search → for each handle: profile and/or status → message and/or thread;
-or inbox → thread for recent personal messaging workflows.
+or inbox → thread --thread-id for recent personal messaging workflows.
 Engagement: notifications → reply/react by notification index, or posts comments →
 posts comment-reply/comment-react when a comment id is available.
 Company pages: page list → choose company_id → page posts/page post/page post-scheduled

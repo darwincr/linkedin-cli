@@ -91,7 +91,7 @@ so you can clear it by hand, then carry on.
 | `status <id>` | Connection state | `{public_identifier, state}` |
 | `connect <id>` | Send a connection request (no note) | `{public_identifier, state}` |
 | `message <id> --text … [--attachment PATH]` | Send a direct message, optionally with one or more attachments | `{public_identifier, sent, attachments[]}` |
-| `thread <id> [--limit N]` | Read a conversation's messages and structured attachments | `{public_identifier, messages[]}` |
+| `thread <id> [--thread-id T] [--limit N]` | Read a conversation's messages and structured attachments by profile id or inbox thread id | `{public_identifier, messages[]}` or `{thread_id, messages[]}` |
 | `notifications [--limit N]` | List visible LinkedIn notifications; read-only | `{notifications[]}` |
 | `notifications reply --index N --text T` | Reply to the comment referenced by a visible notification | `{index, notification, replied, text}` |
 | `notifications react --index N [--reaction like/celebrate/support/love/insightful/funny]` | React to the post/comment referenced by a visible notification | `{index, notification, reaction, reacted}` |
@@ -127,8 +127,10 @@ so you can clear it by hand, then carry on.
 | `page reply <company-id> <thread> --text T [--attachment PATH]` | Reply to a company page inbox thread, optionally with one or more attachments | `{company_id, thread_id, sent, text, attachments[], attached}` |
 
 An `<id>` is a public handle (`alice-smith`) or a full profile URL. Commands that
-need the internal member `urn` (`message`/`thread`/`status`) resolve it for you —
-every command is independent and takes only a handle.
+need the internal member `urn` (`message`/`thread`/`status`) resolve it for you.
+For recent personal messaging workflows, `inbox` returns `thread_id`; pass it to
+`thread --thread-id <thread_id>` to read that conversation without resolving a
+profile handle.
 
 Personal messages support file attachments with repeatable `--attachment PATH`.
 `thread --json` returns each message as `{sender, text, timestamp, attachments}`.
@@ -183,6 +185,10 @@ Example messaging workflows:
 
 ```bash
 linkedin-cli thread yanca-ranzone --limit 50 --json
+linkedin-cli inbox --limit 20 --json
+linkedin-cli thread --thread-id 2-ZjMzZDRiMjQtOWIyNC00Y2YyLTk4NjYtOWI3NzE4MGIzM2E1XzEwMA== \
+  --limit 50 \
+  --json
 linkedin-cli message yanca-ranzone \
   --text "Here is the file" \
   --attachment ./pdf-invoice-example.pdf \

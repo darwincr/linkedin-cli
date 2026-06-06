@@ -63,6 +63,12 @@ def _conversation_id(conversation_url: str | None, entity_urn: str | None) -> st
     return entity_urn.rsplit(":", 1)[-1]
 
 
+def conversation_urn_from_thread_id(thread_id: str, mailbox_urn: str) -> str:
+    if thread_id.startswith("urn:li:msg_conversation:"):
+        return thread_id
+    return f"urn:li:msg_conversation:({mailbox_urn},{thread_id})"
+
+
 def _message_text(message: dict) -> str:
     body = message.get("body") or {}
     if isinstance(body, dict):
@@ -278,6 +284,25 @@ def get_conversation(session, target_urn: str, mailbox_urn: str, *, limit: int =
 
     raw_elements = []
     for start in range(0, max(limit, 1), 50):
+        raw = fetch_messages(api, conversation_urn, count=min(50, limit - start), start=start)
+        batch = raw.get("data", {}).get("messengerMessagesBySyncToken", {}).get("elements", [])
+        if not batch:
+            break
+        raw_elements.extend(batch)
+        if len(raw_elements) >= limit:
+            break
+    return parse_messages({"data": {"messengerMessagesBySyncToken": {"elements": raw_elements[:limit]}}})
+
+
+def get_conversation_by_thread_id(session, thread_id: str, mailbox_urn: str, *, limit: int = 50) -> list[dict]:
+    """Retrieve past messages by the thread_id returned from personal inbox."""
+    session.ensure_browser()
+    api = PlaywrightLinkedinAPI(session=session)
+    limit = max(limit, 1)
+    conversation_urn = conversation_urn_from_thread_id(thread_id, mailbox_urn)
+
+    raw_elements = []
+    for start in range(0, limit, 50):
         raw = fetch_messages(api, conversation_urn, count=min(50, limit - start), start=start)
         batch = raw.get("data", {}).get("messengerMessagesBySyncToken", {}).get("elements", [])
         if not batch:
