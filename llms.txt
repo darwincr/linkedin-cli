@@ -46,6 +46,8 @@ company pages the session can administer before calling company page commands.
 - `connect <id>` → `{ "public_identifier", "state": "Pending"|"Qualified" }` (no note)
 - `message <id> --text <msg> [--attachment PATH ...]` →
   `{ "public_identifier", "sent": bool, "attachments": [PATH] }`
+- `inbox [--limit N]` →
+  `{ "conversations": [ { "thread_id", "entity_urn", "url", "participants": [ { "name", "public_identifier", "urn" } ], "last_message", "last_activity_at", "unread_count" } ] }`
 - `thread <id> [--limit N]` →
   `{ "public_identifier", "messages": [ { "sender", "text", "timestamp", "attachments": [ { "type": "file", "name", "media_type", "byte_size", "asset_urn", "url" } ] } ] }`
 - `notifications [--limit N]` →
@@ -111,14 +113,15 @@ company pages the session can administer before calling company page commands.
 - `page reply <company-id> <thread-id-or-url> --text <text> [--attachment PATH ...]` →
   `{ "company_id", "thread_id", "sent": bool, "text", "attachments": [PATH], "attached": bool }`
 
-Messaging notes: `--attachment` is repeatable. Personal `thread` reads messages
+Messaging notes: `--attachment` is repeatable. Personal `inbox` lists recent
+messaging conversations through Voyager. Personal `thread` reads messages
 through Voyager and returns structured file attachments from `renderContent`.
 Company page inbox reads are DOM-based: `page inbox` and `page thread` scroll to
 load more visible threads/messages up to `--limit`, and `page thread` returns
 structured file attachments from the admin inbox attachment rows. Attachment URLs
 are LinkedIn signed URLs and may expire.
 
-Read-only commands: `whoami`, `search`, `profile`, `status`, `thread`,
+Read-only commands: `whoami`, `search`, `profile`, `status`, `inbox`, `thread`,
 `notifications`, `jobs search`, `jobs saved`, `jobs show`, `posts profile`,
 `posts show`, `posts engagement`, `posts comments`, `posts scheduled`, `page list`, `page posts`,
 `page post`, `page post-scheduled`, `page inbox`, `page thread`.
@@ -137,7 +140,8 @@ Stable `type` values to branch on: `checkpoint_challenge`, `authentication`,
 
 ## Typical agent loop
 
-People: search → for each handle: profile and/or status → message and/or thread.
+People: search → for each handle: profile and/or status → message and/or thread;
+or inbox → thread for recent personal messaging workflows.
 Engagement: notifications → reply/react by notification index, or posts comments →
 posts comment-reply/comment-react when a comment id is available.
 Company pages: page list → choose company_id → page posts/page post/page post-scheduled

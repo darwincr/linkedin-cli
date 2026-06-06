@@ -1,12 +1,105 @@
 # linkedin/actions/conversations.py
-"""Retrieve past LinkedIn conversations for a given profile."""
+"""Retrieve past LinkedIn conversations."""
 import logging
 from datetime import datetime, timezone
+from urllib.parse import urljoin, urlparse
 
 from linkedin_cli.api.client import PlaywrightLinkedinAPI
 from linkedin_cli.api.messaging import fetch_conversations, fetch_messages, encode_urn
+from linkedin_cli.browser.nav import goto_page
 
 logger = logging.getLogger(__name__)
+
+
+def _messaging_url() -> str:
+    return "https://www.linkedin.com/messaging/"
+
+
+def _timestamp(ms: int | None) -> str:
+    if not ms:
+        return ""
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def _localized_text(value) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return ""
+    if isinstance(value.get("text"), str):
+        return value["text"]
+    for key in ("attributesV2", "attributes"):
+        for item in value.get(key) or []:
+            text = _localized_text(item)
+            if text:
+                return text
+    return ""
+
+
+def _participant_name(participant: dict) -> str:
+    member = (participant.get("participantType") or {}).get("member") or {}
+    profile = member.get("profile") or {}
+    name = _localized_text(profile.get("miniProfileName"))
+    if name:
+        return name
+    first = _localized_text(member.get("firstName"))
+    last = _localized_text(member.get("lastName"))
+    return " ".join(part for part in (first, last) if part) or participant.get("hostIdentityUrn") or "unknown"
+
+
+def _participant_public_identifier(participant: dict) -> str | None:
+    member = (participant.get("participantType") or {}).get("member") or {}
+    profile = member.get("profile") or {}
+    return profile.get("publicIdentifier") or member.get("publicIdentifier")
+
+
+def _conversation_id(conversation_url: str | None, entity_urn: str | None) -> str | None:
+    if conversation_url:
+        path_parts = [part for part in urlparse(conversation_url).path.split("/") if part]
+        if path_parts:
+            return path_parts[-1]
+    if not entity_urn:
+        return None
+    return entity_urn.rsplit(":", 1)[-1]
+
+
+def _message_text(message: dict) -> str:
+    body = message.get("body") or {}
+    if isinstance(body, dict):
+        text = body.get("text")
+        if isinstance(text, str):
+            return text
+    return _localized_text(body)
+
+
+def _conversation_summary(conv: dict, mailbox_urn: str) -> dict:
+    participants = []
+    for participant in conv.get("conversationParticipants") or []:
+        host_urn = participant.get("hostIdentityUrn")
+        if host_urn == mailbox_urn:
+            continue
+        participants.append({
+            "name": _participant_name(participant),
+            "public_identifier": _participant_public_identifier(participant),
+            "urn": host_urn,
+        })
+
+    entity_urn = conv.get("entityUrn")
+    conversation_url = conv.get("conversationUrl")
+    thread_id = _conversation_id(conversation_url, entity_urn)
+    last_activity_at = conv.get("lastActivityAt") or conv.get("lastModifiedAt")
+    messages = ((conv.get("messages") or {}).get("elements") or [])
+    last_message = conv.get("lastMessage") or conv.get("lastMessageEvent") or (messages[0] if messages else {})
+
+    return {
+        "thread_id": thread_id,
+        "entity_urn": entity_urn,
+        "url": urljoin("https://www.linkedin.com", conversation_url) if conversation_url else None,
+        "participants": participants,
+        "last_message": _message_text(last_message),
+        "last_activity_at": _timestamp(last_activity_at),
+        "unread_count": conv.get("unreadCount") or 0,
+    }
 
 
 def _file_attachment(file_data: dict) -> dict:
@@ -77,6 +170,33 @@ def find_conversation_urn_via_navigation(session, target_urn: str) -> str | None
         session.context.remove_listener("response", on_response)
 
     return captured_urn[0]
+
+
+def list_conversations(session, *, limit: int = 20) -> dict:
+    """Return recent personal messaging conversations."""
+    session.ensure_browser()
+    goto_page(
+        session,
+        action=lambda: session.page.goto(_messaging_url(), wait_until="domcontentloaded"),
+        expected_url_pattern="/messaging/",
+        error_message="Failed to open LinkedIn messaging",
+    )
+
+    api = PlaywrightLinkedinAPI(session=session)
+    mailbox_urn = session.self_profile["urn"]
+    limit = max(limit, 1)
+    conversations = []
+
+    for start in range(0, limit, 20):
+        raw = fetch_conversations(api, mailbox_urn, count=min(20, limit - start), start=start)
+        batch = raw.get("data", {}).get("messengerConversationsBySyncToken", {}).get("elements", [])
+        if not batch:
+            break
+        conversations.extend(_conversation_summary(conv, mailbox_urn) for conv in batch)
+        if len(conversations) >= limit:
+            break
+
+    return {"conversations": conversations[:limit]}
 
 
 def parse_message_element(msg: dict) -> dict | None:

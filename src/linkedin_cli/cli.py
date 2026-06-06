@@ -134,6 +134,26 @@ def _human_thread(result: dict) -> str:
     )
 
 
+def _human_inbox(result: dict) -> str:
+    conversations = result.get("conversations") or []
+    if not conversations:
+        return "(no conversations)"
+    lines = [f"{len(conversations)} conversation(s):"]
+    for conversation in conversations:
+        participants = ", ".join(
+            p.get("public_identifier") or p.get("name") or p.get("urn") or "unknown"
+            for p in conversation.get("participants") or []
+        )
+        preview = " ".join((conversation.get("last_message") or "").split())
+        lines.append("  " + " — ".join(x for x in (
+            conversation.get("thread_id"),
+            participants,
+            conversation.get("last_activity_at"),
+            preview,
+        ) if x)[:220])
+    return "\n".join(lines)
+
+
 def _human_search(result: dict) -> str:
     profiles = result.get("profiles") or []
     if not profiles:
@@ -349,6 +369,7 @@ _HUMAN = {
     "connect": _human_state,
     "message": _human_sent,
     "profile": _human_profile,
+    "inbox": _human_inbox,
     "thread": _human_thread,
     "search": _human_search,
     "jobs-search": _human_jobs_search,
@@ -474,6 +495,12 @@ def _verb_thread(session, args) -> dict:
     profile = _scrape(session, args.handle)
     messages = get_conversation(session, profile.get("urn"), session.self_profile["urn"], limit=args.limit)
     return {"public_identifier": profile.get("public_identifier"), "messages": messages}
+
+
+def _verb_inbox(session, args) -> dict:
+    from linkedin_cli.actions.conversations import list_conversations
+
+    return list_conversations(session, limit=args.limit)
 
 
 def _verb_search(session, args) -> dict:
@@ -712,6 +739,7 @@ _VERBS = {
     "status": _verb_status,
     "connect": _verb_connect,
     "message": _verb_message,
+    "inbox": _verb_inbox,
     "thread": _verb_thread,
     "search": _verb_search,
     "jobs-search": _verb_jobs_search,
@@ -849,8 +877,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("connect", parents=[common],
                    help="Send a connection request (no note); no-op if already Connected or Pending"
                    ).add_argument("handle", help=handle_help)
+    p_inbox = sub.add_parser("inbox", parents=[common],
+                             help="List recent personal messaging conversations")
+    p_inbox.add_argument("--limit", type=int, default=20, help="Maximum conversations to return (default: 20)")
     p_thread = sub.add_parser("thread", parents=[common],
-                              help="Dump the conversation with the member as a list of messages (newest last)")
+                               help="Dump the conversation with the member as a list of messages (newest last)")
     p_thread.add_argument("handle", help=handle_help)
     p_thread.add_argument("--limit", type=int, default=50, help="Maximum messages to return (default: 50)")
 
