@@ -204,14 +204,16 @@ def _human_jobs_apply(result: dict) -> str:
 
 
 def _human_posts(result: dict) -> str:
-    posts = result.get("posts") or []
+    posts = result.get("posts") or result.get("scheduled_posts") or []
     if not posts:
         return "(no posts)"
-    header = f"{len(posts)} post(s) on page {result.get('page', 1)}:"
+    header = f"{len(posts)} post(s) on page {result.get('page', 1)}:" if result.get("page") else f"{len(posts)} scheduled post(s):"
     return "\n".join(
         [header] + [
             "  " + " — ".join(x for x in (
+                str(p.get("index")) if p.get("index") is not None else None,
                 p.get("activity_id"),
+                p.get("scheduled_at"),
                 p.get("author"),
                 (p.get("content") or "").splitlines()[0][:80] if p.get("content") else None,
             ) if x)
@@ -252,6 +254,8 @@ def _human_post_write(result: dict) -> str:
         return "draft saved"
     if result.get("scheduled"):
         return f"scheduled for {result.get('scheduled_at')}"
+    if result.get("cancelled"):
+        return f"cancelled scheduled post {result.get('index')}"
     if result.get("deleted"):
         return "deleted"
     if result.get("replied"):
@@ -274,14 +278,17 @@ def _human_notifications(result: dict) -> str:
 
 
 def _human_page_posts(result: dict) -> str:
-    posts = result.get("posts") or []
+    posts = result.get("posts") or result.get("scheduled_posts") or []
     if not posts:
         return "(no page posts)"
-    header = f"{len(posts)} page post(s) in {result.get('tab', 'published')}:"
+    tab = result.get("tab") or ("scheduled" if result.get("scheduled_posts") is not None else "published")
+    header = f"{len(posts)} page post(s) in {tab}:"
     return "\n".join(
         [header] + [
             "  " + " — ".join(x for x in (
+                str(p.get("index")) if p.get("index") is not None else None,
                 p.get("activity_id"),
+                p.get("scheduled_at"),
                 (p.get("content") or "").splitlines()[0][:100] if p.get("content") else None,
             ) if x)
             for p in posts
@@ -302,6 +309,10 @@ def _human_page_list(result: dict) -> str:
 def _human_page_post_write(result: dict) -> str:
     if result.get("posted"):
         return "posted"
+    if result.get("scheduled"):
+        return f"scheduled for {result.get('scheduled_at')}"
+    if result.get("cancelled"):
+        return f"cancelled scheduled page post {result.get('index')}"
     if result.get("deleted"):
         return "deleted"
     return "not completed"
@@ -353,6 +364,8 @@ _HUMAN = {
     "posts-create": _human_post_write,
     "posts-draft": _human_post_write,
     "posts-schedule": _human_post_write,
+    "posts-scheduled": _human_posts,
+    "posts-cancel": _human_post_write,
     "posts-delete": _human_post_write,
     "posts-comment-reply": _human_post_write,
     "posts-react": _human_post_write,
@@ -364,6 +377,9 @@ _HUMAN = {
     "page-posts": _human_page_posts,
     "page-post": _human_post,
     "page-post-create": _human_page_post_write,
+    "page-post-schedule": _human_page_post_write,
+    "page-post-scheduled": _human_page_posts,
+    "page-post-cancel": _human_page_post_write,
     "page-post-delete": _human_page_post_write,
     "page-inbox": _human_page_inbox,
     "page-thread": _human_page_thread,
@@ -561,6 +577,18 @@ def _verb_posts_schedule(session, args) -> dict:
     return schedule_post(session, args.text, args.at)
 
 
+def _verb_posts_scheduled(session, args) -> dict:
+    from linkedin_cli.actions.posts import list_scheduled_posts
+
+    return list_scheduled_posts(session)
+
+
+def _verb_posts_cancel(session, args) -> dict:
+    from linkedin_cli.actions.posts import cancel_scheduled_post
+
+    return cancel_scheduled_post(session, args.index)
+
+
 def _verb_posts_delete(session, args) -> dict:
     from linkedin_cli.actions.posts import delete_post
 
@@ -635,6 +663,24 @@ def _verb_page_post_create(session, args) -> dict:
     )
 
 
+def _verb_page_post_schedule(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import schedule_page_post
+
+    return schedule_page_post(session, args.company, args.text, args.at)
+
+
+def _verb_page_post_scheduled(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import list_page_scheduled_posts
+
+    return list_page_scheduled_posts(session, args.company)
+
+
+def _verb_page_post_cancel(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import cancel_page_scheduled_post
+
+    return cancel_page_scheduled_post(session, args.company, args.index)
+
+
 def _verb_page_post_delete(session, args) -> dict:
     from linkedin_cli.actions.page_admin import delete_page_post
 
@@ -681,6 +727,8 @@ _VERBS = {
     "posts-create": _verb_posts_create,
     "posts-draft": _verb_posts_draft,
     "posts-schedule": _verb_posts_schedule,
+    "posts-scheduled": _verb_posts_scheduled,
+    "posts-cancel": _verb_posts_cancel,
     "posts-delete": _verb_posts_delete,
     "posts-comment-reply": _verb_posts_comment_reply,
     "posts-react": _verb_posts_react,
@@ -692,6 +740,9 @@ _VERBS = {
     "page-posts": _verb_page_posts,
     "page-post": _verb_page_post,
     "page-post-create": _verb_page_post_create,
+    "page-post-schedule": _verb_page_post_schedule,
+    "page-post-scheduled": _verb_page_post_scheduled,
+    "page-post-cancel": _verb_page_post_cancel,
     "page-post-delete": _verb_page_post_delete,
     "page-inbox": _verb_page_inbox,
     "page-thread": _verb_page_thread,
@@ -870,6 +921,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_posts_schedule.add_argument("--text", required=True, help="Post body text")
     p_posts_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
 
+    posts_sub.add_parser("scheduled", parents=[common], help="List scheduled posts")
+
+    p_posts_cancel = posts_sub.add_parser("cancel", parents=[common], help="Cancel a scheduled post by 1-based index")
+    p_posts_cancel.add_argument("index", type=int, help="1-based index from the scheduled posts list")
+
     posts_sub.add_parser("delete", parents=[common], help="Delete a LinkedIn post by id, URN, or URL").add_argument("post", help=posts_handle_help)
 
     p_posts_comment_reply = posts_sub.add_parser("comment-reply", parents=[common], help="Reply to a visible comment on a post")
@@ -921,6 +977,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_page_post_create.add_argument("--document", action="append", default=[], help="Document file to attach (repeatable)")
     p_page_post_create.add_argument("--poll-question", help="Poll question; defaults to the post text when LinkedIn requires one")
     p_page_post_create.add_argument("--poll-option", action="append", default=[], help="Poll option (repeat at least twice to create a poll)")
+
+    p_page_post_schedule = page_sub.add_parser("post-schedule", parents=[common], help="Schedule a company page text post for a specific local datetime")
+    p_page_post_schedule.add_argument("company", help=company_help)
+    p_page_post_schedule.add_argument("--text", required=True, help="Post body text")
+    p_page_post_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
+
+    p_page_post_scheduled = page_sub.add_parser("post-scheduled", parents=[common], help="List scheduled company page posts")
+    p_page_post_scheduled.add_argument("company", help=company_help)
+
+    p_page_post_cancel = page_sub.add_parser("post-cancel", parents=[common], help="Cancel a scheduled company page post by 1-based index")
+    p_page_post_cancel.add_argument("company", help=company_help)
+    p_page_post_cancel.add_argument("index", type=int, help="1-based index from the scheduled page posts list")
 
     p_page_post_delete = page_sub.add_parser("post-delete", parents=[common], help="Delete a company page post by activity id or URL")
     p_page_post_delete.add_argument("company", help=company_help)

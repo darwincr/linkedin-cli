@@ -76,6 +76,13 @@ SELECTORS = {
         'div[role="dialog"] button:has-text("Done"), '
         'div[role="dialog"] button:has-text("Schedule")'
     ),
+    "scheduled_post_preview": (
+        'button[aria-label*="Preview of the scheduled post" i]'
+    ),
+    "scheduled_post_actions": (
+        'button[aria-label*="Actions menu for scheduled post" i], '
+        'button[aria-label*="Open control menu" i]'
+    ),
     "attachment_next": (
         'div[role="dialog"] button:has-text("Next"), '
         'div[role="dialog"] button:has-text("Done")'
@@ -601,22 +608,95 @@ def _add_poll(session, question: str | None, options: list[str] | None) -> bool:
 
 
 def _schedule_time(session, scheduled_at: str) -> None:
-    when = datetime.fromisoformat(scheduled_at)
+    try:
+        when = datetime.fromisoformat(scheduled_at)
+    except ValueError as exc:
+        raise ValueError("Scheduled time must be an ISO local datetime, e.g. 2026-06-10T09:30") from exc
     if not _click_first(session.page, SELECTORS["schedule_button"]):
         raise RuntimeError("Could not open LinkedIn schedule controls")
 
-    dialog = _first_visible(session.page, SELECTORS["composer"])
-    fields = dialog.locator('input, select')
-    values = [when.strftime("%Y-%m-%d"), when.strftime("%I:%M %p")]
-    if fields.count() == 0:
-        raise RuntimeError("Could not find LinkedIn schedule fields")
-    for index, value in enumerate(values):
-        if index >= fields.count():
+    session.wait(1.0, 2.0)
+
+    dialogs = session.page.locator(SELECTORS["composer"]).all()
+    for dialog in reversed(dialogs):
+        if not dialog.is_visible():
+            continue
+        date_input = dialog.locator('input[aria-label="Date"]').first
+        time_input = dialog.locator('input[aria-label="Time"]').first
+        if date_input.count() and time_input.count() and date_input.is_visible() and time_input.is_visible():
+            date_input.fill(f"{when.month}/{when.day}/{when.year}")
+            time_input.fill(when.strftime("%I:%M %p"))
+            time_input.press("Tab")
+            session.wait(0.5, 1.0)
             break
-        fields.nth(index).fill(value)
-    if not _click_first(session.page, SELECTORS["confirm_schedule"]):
+    else:
+        _select_schedule_date_from_calendar(session, when)
+        _fill_schedule_time(session, when)
+
+    confirmed = False
+    dialogs = session.page.locator(SELECTORS["composer"]).all()
+    for dialog in reversed(dialogs):
+        if not dialog.is_visible():
+            continue
+        for button in dialog.locator("button").all():
+            text = " ".join((button.inner_text() or "").split())
+            aria = button.get_attribute("aria-label") or ""
+            if not button.is_visible() or not button.is_enabled():
+                continue
+            if text == "Next" and aria == "Next":
+                button.click(force=True)
+                confirmed = True
+                break
+        if confirmed:
+            break
+    if not confirmed:
         raise RuntimeError("Could not confirm LinkedIn schedule controls")
     session.wait(1.0, 2.0)
+
+
+def _select_schedule_date_from_calendar(session, when: datetime) -> None:
+    target_day = when.day
+    target_month = when.strftime("%B %Y")
+    day_label_patterns = [
+        f"{target_day} {target_month}",
+        f"{when.strftime('%A, %B')} {target_day}, {when.year}",
+    ]
+    clicked_day = False
+    dialogs = session.page.locator(SELECTORS["composer"]).all()
+    for dialog in reversed(dialogs):
+        if not dialog.is_visible():
+            continue
+        for button in dialog.locator("button").all():
+            if not button.is_visible():
+                continue
+            aria = button.get_attribute("aria-label") or ""
+            text = " ".join((button.inner_text() or "").split())
+            for pattern in day_label_patterns:
+                if pattern in aria and str(target_day) == text:
+                    button.click(force=True)
+                    clicked_day = True
+                    break
+            if clicked_day:
+                break
+        if clicked_day:
+            break
+    if not clicked_day:
+        raise RuntimeError(f"Could not select LinkedIn schedule date {when.date().isoformat()}")
+
+
+def _fill_schedule_time(session, when: datetime) -> None:
+    time_inputs = session.page.locator(
+        'input[type="text"], input:not([type])'
+    ).all()
+    filled_time = False
+    for inp in time_inputs:
+        if not inp.is_visible():
+            continue
+        inp.fill(when.strftime("%I:%M %p"))
+        filled_time = True
+        break
+    if not filled_time:
+        raise RuntimeError("Could not find LinkedIn schedule time field")
 
 
 def create_post(
@@ -671,10 +751,19 @@ def schedule_post(session: "LinkedInSession", text: str, scheduled_at: str) -> d
     """Schedule a text post for an ISO local datetime accepted by LinkedIn's composer."""
     if not text.strip():
         raise ValueError("Post text cannot be empty")
+
+    for _ in range(5):
+        dialogs = session.page.locator(SELECTORS["composer"]).all()
+        visible = [d for d in dialogs if d.is_visible()]
+        if not visible:
+            break
+        session.page.keyboard.press("Escape")
+        session.wait(0.5, 1.0)
+
     _open_composer(session)
     _set_text(session, text)
     _schedule_time(session, scheduled_at)
-    if not _click_dialog_button(session, ["Post"]):
+    if not _click_dialog_button(session, ["Post", "Schedule"]):
         raise RuntimeError("Could not find LinkedIn schedule submit button")
     session.wait(2.0, 4.0)
     return {"scheduled": True, "scheduled_at": scheduled_at, "text": text}
@@ -693,8 +782,239 @@ def delete_post(session: "LinkedInSession", post_id_or_url: str) -> dict:
     return {"deleted": True, "activity_id": post.get("activity_id"), "url": post.get("url")}
 
 
-def _open_comment(session: "LinkedInSession", post_id_or_url: str, comment_id: str | None = None) -> dict:
+def list_scheduled_posts(session: "LinkedInSession", open_scheduled_posts=None) -> dict:
+    """List scheduled posts from the LinkedIn feed management page."""
+    cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
+    scheduled_posts = []
+    for index in range(1, len(cards) + 1):
+        cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
+        post = _scheduled_post_from_card(index, cards[index - 1])
+        detail_content = _scheduled_post_detail_content(session, index, open_scheduled_posts=open_scheduled_posts)
+        if detail_content:
+            post["content"] = detail_content
+        scheduled_posts.append(post)
+    return {"scheduled_posts": scheduled_posts}
+
+
+def _open_scheduled_posts(session: "LinkedInSession") -> None:
     session.ensure_browser()
+    goto_page(
+        session,
+        action=lambda: session.page.goto(
+            "https://www.linkedin.com/feed/?shareActive=true&view=management",
+            wait_until="domcontentloaded",
+        ),
+        expected_url_pattern="/feed/",
+        error_message="Failed to open feed management",
+    )
+    session.wait(2.0, 4.0)
+
+
+def _scheduled_post_cards(session: "LinkedInSession", open_scheduled_posts=None) -> list:
+    (open_scheduled_posts or _open_scheduled_posts)(session)
+    cards = []
+    seen = set()
+    preview_buttons = session.page.locator(SELECTORS["scheduled_post_preview"]).all()
+    for btn in preview_buttons:
+        if not btn.is_visible():
+            continue
+        card = btn.locator("xpath=ancestor::*[.//button[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'actions menu for scheduled post')]][1]").first
+        if not card.count():
+            card = btn.locator("xpath=ancestor::div[contains(@class,'feed-shared-update-v2') or contains(@class,'update-components') or @data-urn or @data-id][1]").first
+        if not card.count():
+            continue
+        handle = card.element_handle()
+        if not handle:
+            continue
+        key = handle.evaluate("el => el.outerHTML.slice(0, 500)")
+        if key in seen:
+            continue
+        seen.add(key)
+        cards.append(card)
+
+    if cards:
+        return cards
+
+    action_buttons = session.page.locator(SELECTORS["scheduled_post_actions"]).all()
+    for btn in action_buttons:
+        if not btn.is_visible():
+            continue
+        card = btn.locator("xpath=ancestor::*[.//button[contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'preview of the scheduled post')]][1]").first
+        if card.count():
+            cards.append(card)
+    return cards
+
+
+def _scheduled_post_from_card(index: int, card) -> dict:
+    text = card.inner_text().strip()
+    lines = _text_lines(text)
+    preview = card.locator(SELECTORS["scheduled_post_preview"]).first
+
+    label = ""
+    if preview.count():
+        label = preview.get_attribute("aria-label") or preview.inner_text().strip()
+
+    scheduled_at = _scheduled_at_from_text("\n".join([label, text]))
+    urn = card.get_attribute("data-urn") or card.get_attribute("data-id")
+    if not urn:
+        tagged = card.locator("[data-urn], [data-id]").first
+        if tagged.count():
+            urn = tagged.get_attribute("data-urn") or tagged.get_attribute("data-id")
+
+    return {
+        "index": index,
+        "activity_id": _activity_id(urn) if urn else None,
+        "scheduled_at": scheduled_at,
+        "scheduled_label": label or None,
+        "content": _scheduled_content_from_lines(lines),
+    }
+
+
+def _scheduled_at_from_text(text: str) -> str | None:
+    patterns = [
+        r"published on\s+(.+?),\s+click",
+        r"scheduled (?:for|on)\s+([^\n]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def _scheduled_content_from_lines(lines: list[str]) -> str | None:
+    ignored = {
+        "Delete post",
+        "Edit post",
+        "Preview",
+        "Scheduled posts",
+        "Scheduled post",
+    }
+    body = []
+    for line in lines:
+        lower = line.lower()
+        if line in ignored:
+            continue
+        if "actions menu for scheduled post" in lower or "preview of the scheduled post" in lower:
+            continue
+        if lower.startswith("scheduled for ") or lower.startswith("scheduled on "):
+            continue
+        if lower.startswith("posting "):
+            continue
+        if re.search(r"published on\s+.+?,\s+click", line, flags=re.IGNORECASE):
+            continue
+        body.append(line)
+    return "\n".join(body).strip() or None
+
+
+def _scheduled_post_detail_content(session: "LinkedInSession", index: int, open_scheduled_posts=None) -> str | None:
+    cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
+    if index > len(cards):
+        return None
+    preview = cards[index - 1].locator(SELECTORS["scheduled_post_preview"]).first
+    if not preview.count() or not preview.is_visible():
+        return None
+
+    preview.click(force=True)
+    session.wait(1.0, 2.0)
+    try:
+        return _scheduled_detail_content(session)
+    finally:
+        session.page.keyboard.press("Escape")
+        session.wait(0.5, 1.0)
+        (open_scheduled_posts or _open_scheduled_posts)(session)
+
+
+def _scheduled_detail_content(session: "LinkedInSession") -> str | None:
+    candidates = []
+    selectors = [
+        'div[role="dialog"]',
+        'div[role="alertdialog"]',
+        'div.artdeco-modal-overlay',
+        SELECTORS["post"],
+    ]
+    for selector in selectors:
+        for item in session.page.locator(selector).all():
+            if item.is_visible():
+                candidates.append(item.inner_text().strip())
+
+    for text in candidates:
+        content = _scheduled_detail_content_from_lines(_text_lines(text))
+        if content:
+            return content
+    return None
+
+
+def _scheduled_detail_content_from_lines(lines: list[str]) -> str | None:
+    body = []
+    in_body = False
+    stop_lines = {
+        "Open Emoji Keyboard",
+        "Schedule",
+        "Back",
+        "Next",
+        "Delete post",
+        "Edit post",
+        "View all scheduled posts",
+    }
+    skip_lines = {
+        "Dialog content start.",
+        "Dialog content end.",
+        "Create post modal",
+        "Post to Anyone",
+        "Edit",
+    }
+    for line in lines:
+        lower = line.lower()
+        if line in skip_lines:
+            continue
+        if lower.startswith("posting "):
+            in_body = True
+            continue
+        if not in_body:
+            continue
+        if line in stop_lines or lower.startswith("open emoji"):
+            break
+        if lower.startswith("add media") or lower.startswith("create an event"):
+            break
+        body.append(line)
+    return "\n".join(body).strip() or None
+
+
+def cancel_scheduled_post(session: "LinkedInSession", index: int, open_scheduled_posts=None) -> dict:
+    """Cancel a scheduled post by 1-based index from the management page list."""
+    if index < 1:
+        raise ValueError("Index must be 1-based (1 or higher)")
+    cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
+    if index > len(cards):
+        raise ValueError(f"Only {len(cards)} scheduled post(s) found; index {index} is out of range")
+
+    post = _scheduled_post_from_card(index, cards[index - 1])
+    actions = cards[index - 1].locator(SELECTORS["scheduled_post_actions"]).all()
+    visible_actions = [button for button in actions if button.is_visible() and button.is_enabled()]
+    if not visible_actions:
+        raise RuntimeError("Could not find scheduled post action menu")
+    visible_actions[-1].click(force=True)
+    session.wait(0.5, 1.0)
+
+    delete_option = session.page.locator(
+        '[role="menuitem"]:has-text("Delete post"), '
+        '.artdeco-dropdown__content:visible [aria-label="Delete post"], '
+        '.artdeco-dropdown__content:visible button:has-text("Delete")'
+    ).first
+    if not delete_option.is_visible():
+        raise RuntimeError("Could not find 'Delete post' option in scheduled post actions menu")
+    delete_option.click(force=True)
+    session.wait(1.0, 2.0)
+
+    if not _click_dialog_button(session, ["Delete"], timeout_ms=6_000):
+        raise RuntimeError("Could not confirm scheduled post deletion")
+
+    session.wait(2.0, 4.0)
+    return {"cancelled": True, **post}
+
+
+def _open_comment(session: "LinkedInSession", post_id_or_url: str, comment_id: str | None = None) -> dict:
     url = _comment_url(post_id_or_url, comment_id)
     goto_page(
         session,

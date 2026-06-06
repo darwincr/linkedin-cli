@@ -108,6 +108,8 @@ so you can clear it by hand, then carry on.
 | `posts create --text T [--image PATH] [--document PATH] [--poll-option O]` | Create a post with optional images, documents, or poll | `{posted, text, images, documents, poll}` |
 | `posts draft --text T` | Write a post, close the composer, and save LinkedIn's draft prompt | `{drafted, text}` |
 | `posts schedule --text T --at 2026-06-10T09:30` | Schedule a text post for a local datetime | `{scheduled, scheduled_at, text}` |
+| `posts scheduled` | List scheduled posts; read-only | `{scheduled_posts[]}` |
+| `posts cancel <index>` | Cancel a scheduled post by 1-based index from `posts scheduled` | `{cancelled, index, scheduled_at, content}` |
 | `posts delete <post>` | Delete a post by id, URN, or URL | `{deleted, activity_id, url}` |
 | `posts react <post> [--reaction like/celebrate/support/love/insightful/funny]` | React to a post | `{activity_id, reaction, reacted}` |
 | `posts comment-reply <post> --comment-id C --text T [--author A]` | Reply to a visible comment | `{activity_id, comment_id, replied, text}` |
@@ -116,6 +118,9 @@ so you can clear it by hand, then carry on.
 | `page posts <company-id> [--limit N]` | List visible published posts for a company page admin; read-only | `{company_id, tab, posts[]}` |
 | `page post <company-id> <post>` | Show one company page post by activity id or URL; read-only | `{activity_id, url, author, content, engagement}` |
 | `page post-create <company-id> --text T [--image PATH] [--document PATH] [--poll-option O]` | Create a company page post with optional images, documents, or poll | `{company_id, posted, text, images, documents, poll, uploaded_images, uploaded_documents}` |
+| `page post-schedule <company-id> --text T --at 2026-06-10T09:30` | Schedule a company page text post for a local datetime | `{company_id, scheduled, scheduled_at, text}` |
+| `page post-scheduled <company-id>` | List scheduled company page posts; read-only | `{company_id, scheduled_posts[]}` |
+| `page post-cancel <company-id> <index>` | Cancel a scheduled company page post by 1-based index from `page post-scheduled` | `{company_id, cancelled, index, scheduled_at, content}` |
 | `page post-delete <company-id> <post>` | Delete a company page post by id, URN, or URL | `{company_id, activity_id, deleted}` |
 | `page inbox <company-id> [--limit N]` | List company page inbox threads, scrolling to load more up to the limit; read-only | `{company_id, threads[]}` |
 | `page thread <company-id> <thread> [--limit N]` | Show messages and structured attachments in a company page inbox thread; read-only | `{company_id, thread_id, messages[]}` |
@@ -139,15 +144,18 @@ and the first dialog is already ready to submit.
 
 A `<post>` is a LinkedIn activity id (`7380000000000000000`), an `urn:li:activity:...`
 or `urn:li:share:...` URN, or a full `/feed/update/...` URL. The `posts profile`,
-`posts show`, and `posts engagement` commands are read-only. The `posts create`,
-`posts draft`, `posts schedule`, `posts delete`, `posts react`, `posts comment-reply`,
-and `posts comment-react` commands change LinkedIn state.
+`posts show`, `posts engagement`, `posts scheduled`, and `page post-scheduled` commands are read-only.
+The `posts create`, `posts draft`, `posts schedule`, `posts cancel`, `posts delete`,
+`posts react`, `posts comment-reply`, and `posts comment-react` commands change
+LinkedIn state.
 
 A `<company-id>` is the numeric id in a company admin URL such as
 `https://www.linkedin.com/company/112454418/admin/`. Use `page list` to discover
 company pages the bound session can administer. `page post-create` uses the same
 composer upload flow as `posts create`, including images, documents, and polls;
-LinkedIn does not allow combining polls with image/document uploads. The page
+`page post-schedule`, `page post-scheduled`, and `page post-cancel` reuse the same
+scheduled-post composer and management flow as personal profile posts. LinkedIn
+does not allow combining polls with image/document uploads. The page
 inbox commands depend on LinkedIn's admin inbox DOM: `page inbox` scrolls the
 thread list to load more visible threads up to `--limit`, while `page thread`
 scrolls the thread to load visible message nodes up to `--limit`. `page reply`
@@ -161,6 +169,7 @@ Example company page workflow:
 ```bash
 linkedin-cli page list --json
 linkedin-cli page posts 112454418 --json
+linkedin-cli page post-scheduled 112454418 --json
 
 linkedin-cli page post-create 112454418 \
   --text "Temporary image test" \

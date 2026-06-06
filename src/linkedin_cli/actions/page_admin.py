@@ -52,6 +52,10 @@ SELECTORS = {
         'div[role="dialog"] button[aria-label*="More" i], '
         'div[role="dialog"] button:has-text("More")'
     ),
+    "schedule_button": (
+        'div[role="dialog"] button[aria-label*="Schedule" i], '
+        'div[role="dialog"] button:has-text("Schedule")'
+    ),
     "overflow": (
         'button[aria-label*="More" i], '
         'button[aria-label*="Open control menu" i], '
@@ -353,6 +357,19 @@ def list_page_posts(session: "LinkedInSession", company_id: str, *, limit: int =
     return {"company_id": company_id, "tab": tab, "posts": _visible_page_posts(session.page, limit=limit)}
 
 
+def _open_page_scheduled_posts(session: "LinkedInSession", company_id: str) -> None:
+    _open_page_post_composer(session, company_id)
+    if not _click_first(session.page, SELECTORS["schedule_button"]):
+        raise RuntimeError("Could not open LinkedIn page schedule controls")
+    session.wait(1.0, 2.0)
+
+    view_all = session.page.locator('div[role="dialog"] button:has-text("View all scheduled posts")').first
+    if not view_all.is_visible():
+        raise RuntimeError("Could not open LinkedIn page scheduled posts list")
+    view_all.click(force=True)
+    session.wait(2.0, 4.0)
+
+
 def list_admin_pages(session: "LinkedInSession") -> dict:
     """Return company pages the current session can administer, discovered from the feed."""
     session.ensure_browser()
@@ -375,6 +392,13 @@ def list_admin_pages(session: "LinkedInSession") -> dict:
     return {"pages": pages}
 
 
+def _open_page_post_composer(session: "LinkedInSession", company_id: str) -> None:
+    list_page_posts(session, company_id, limit=1)
+    if not _click_first(session.page, SELECTORS["start_post"]):
+        raise RuntimeError("Could not open LinkedIn page post composer")
+    _first_visible(session.page, SELECTORS["composer"])
+
+
 def create_page_post(
     session: "LinkedInSession",
     company_id: str,
@@ -390,10 +414,7 @@ def create_page_post(
         raise ValueError("Post text cannot be empty")
     if poll_options and (images or documents):
         raise ValueError("LinkedIn posts cannot combine polls with image/document uploads")
-    list_page_posts(session, company_id, limit=1)
-    if not _click_first(session.page, SELECTORS["start_post"]):
-        raise RuntimeError("Could not open LinkedIn page post composer")
-    _first_visible(session.page, SELECTORS["composer"])
+    _open_page_post_composer(session, company_id)
     _set_editor_text(session, text)
     uploaded_images = _upload_files(session, SELECTORS["media_button"], images or [])
     uploaded_documents = _upload_files(session, SELECTORS["document_button"], documents or [])
@@ -411,6 +432,46 @@ def create_page_post(
         "uploaded_images": uploaded_images,
         "uploaded_documents": uploaded_documents,
     }
+
+
+def schedule_page_post(session: "LinkedInSession", company_id: str, text: str, scheduled_at: str) -> dict:
+    """Schedule a company page text post for an ISO local datetime."""
+    if not text.strip():
+        raise ValueError("Post text cannot be empty")
+
+    for _ in range(5):
+        dialogs = session.page.locator(SELECTORS["composer"]).all()
+        visible = [dialog for dialog in dialogs if dialog.is_visible()]
+        if not visible:
+            break
+        session.page.keyboard.press("Escape")
+        session.wait(0.5, 1.0)
+
+    from linkedin_cli.actions.posts import _schedule_time
+
+    _open_page_post_composer(session, company_id)
+    _set_editor_text(session, text)
+    _schedule_time(session, scheduled_at)
+    if not _click_dialog_button(session, ["Post", "Schedule"]):
+        raise RuntimeError("Could not find LinkedIn page schedule submit button")
+    session.wait(2.0, 4.0)
+    return {"company_id": company_id, "scheduled": True, "scheduled_at": scheduled_at, "text": text}
+
+
+def list_page_scheduled_posts(session: "LinkedInSession", company_id: str) -> dict:
+    """List scheduled company page posts from the admin scheduled tab."""
+    from linkedin_cli.actions.posts import list_scheduled_posts
+
+    result = list_scheduled_posts(session, open_scheduled_posts=lambda s: _open_page_scheduled_posts(s, company_id))
+    return {"company_id": company_id, **result}
+
+
+def cancel_page_scheduled_post(session: "LinkedInSession", company_id: str, index: int) -> dict:
+    """Cancel a scheduled company page post by 1-based index."""
+    from linkedin_cli.actions.posts import cancel_scheduled_post
+
+    result = cancel_scheduled_post(session, index, open_scheduled_posts=lambda s: _open_page_scheduled_posts(s, company_id))
+    return {"company_id": company_id, **result}
 
 
 def delete_page_post(session: "LinkedInSession", company_id: str, post_id_or_url: str) -> dict:

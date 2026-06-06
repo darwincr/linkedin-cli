@@ -77,6 +77,10 @@ company pages the session can administer before calling company page commands.
 - `posts draft --text <text>` → `{ "drafted": bool, "text" }`
 - `posts schedule --text <text> --at YYYY-MM-DDTHH:MM` →
   `{ "scheduled": bool, "scheduled_at", "text" }`
+- `posts scheduled` →
+  `{ "scheduled_posts": [ { "index", "activity_id", "scheduled_at", "scheduled_label", "content" } ] }`
+- `posts cancel <index>` →
+  `{ "cancelled": bool, "index", "activity_id", "scheduled_at", "scheduled_label", "content" }`
 - `posts delete <post>` → `{ "deleted": bool, "activity_id", "url" }`
 - `posts react <post> [--reaction like|celebrate|support|love|insightful|funny]` →
   `{ "activity_id", "url", "reaction", "reacted": bool }`
@@ -92,6 +96,12 @@ company pages the session can administer before calling company page commands.
   `{ "activity_id", "url", "author", "content", "engagement" }`
 - `page post-create <company-id> --text <text> [--image PATH] [--document PATH] [--poll-option O ...]` →
   `{ "company_id", "posted": bool, "text", "images", "documents", "poll", "uploaded_images", "uploaded_documents" }`
+- `page post-schedule <company-id> --text <text> --at YYYY-MM-DDTHH:MM` →
+  `{ "company_id", "scheduled": bool, "scheduled_at", "text" }`
+- `page post-scheduled <company-id>` →
+  `{ "company_id", "scheduled_posts": [ { "index", "activity_id", "scheduled_at", "scheduled_label", "content" } ] }`
+- `page post-cancel <company-id> <index>` →
+  `{ "company_id", "cancelled": bool, "index", "activity_id", "scheduled_at", "scheduled_label", "content" }`
 - `page post-delete <company-id> <post>` →
   `{ "company_id", "activity_id", "deleted": bool }`
 - `page inbox <company-id> [--limit N]` →
@@ -110,14 +120,14 @@ are LinkedIn signed URLs and may expire.
 
 Read-only commands: `whoami`, `search`, `profile`, `status`, `thread`,
 `notifications`, `jobs search`, `jobs saved`, `jobs show`, `posts profile`,
-`posts show`, `posts engagement`, `posts comments`, `page list`, `page posts`,
-`page post`, `page inbox`, `page thread`.
+`posts show`, `posts engagement`, `posts comments`, `posts scheduled`, `page list`, `page posts`,
+`page post`, `page post-scheduled`, `page inbox`, `page thread`.
 
 Commands that change LinkedIn state: `connect`, `message`, `jobs save`,
 `jobs unsave`, `jobs apply --submit`, `notifications reply`, `notifications react`,
-`posts create`, `posts draft`, `posts schedule`, `posts delete`, `posts react`,
+`posts create`, `posts draft`, `posts schedule`, `posts cancel`, `posts delete`, `posts react`,
 `posts comment-reply`, `posts comment-react`, `page post-create`,
-`page post-delete`, `page reply`.
+`page post-schedule`, `page post-cancel`, `page post-delete`, `page reply`.
 
 ## Errors
 
@@ -130,9 +140,9 @@ Stable `type` values to branch on: `checkpoint_challenge`, `authentication`,
 People: search → for each handle: profile and/or status → message and/or thread.
 Engagement: notifications → reply/react by notification index, or posts comments →
 posts comment-reply/comment-react when a comment id is available.
-Company pages: page list → choose company_id → page posts/page post for read-only
-inspection; page post-create/page post-delete for page content management; page
-inbox/page thread/page reply for company page inbox workflows.
+Company pages: page list → choose company_id → page posts/page post/page post-scheduled
+for read-only inspection; page post-create/page post-schedule/page post-cancel/page
+post-delete for page content management; page inbox/page thread/page reply for company page inbox workflows.
 
 ## More
 
