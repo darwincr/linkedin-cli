@@ -67,9 +67,11 @@ company pages the session can administer before calling company page commands.
 - `jobs apply <job> [--submit]` →
   `{ "job_id", "url", "method": "external"|"easy_apply"|null, "submitted": bool, "manual": bool, "apply_url", "external_url", "ats", ... }`
 - `posts profile <id> [--page N] [--limit N]` →
-  `{ "public_identifier", "page", "posts": [ { "activity_id", "url", "author", "content", "engagement" } ] }`
+  `{ "public_identifier", "page", "posts": [ { "activity_id", "url", "author", "author_url", "author_public_identifier", "author_headline", "connection_degree", "posted_at", "edited", "edited_at", "visibility", "content", "engagement" } ] }`
+- `posts search <keywords> [--page N] [--limit N] [--sort latest|top-match] [--date-posted past-24h|past-week|past-month] [--content-type videos|photos|jobs|liveVideos|documents] [--from-member URN ...] [--posted-by me|first|following ...] [--author-company ID ...] [--author-job-title WORDS]` →
+  `{ "query", "page", "filters", "posts": [ { "activity_id", "url", "author", "author_url", "author_public_identifier", "author_headline", "connection_degree", "posted_at", "edited", "edited_at", "visibility", "content", "engagement" } ] }`
 - `posts show <post>` →
-  `{ "activity_id", "url", "author", "content", "engagement" }`
+  `{ "activity_id", "url", "author", "author_url", "author_public_identifier", "author_headline", "connection_degree", "posted_at", "edited", "edited_at", "visibility", "content", "engagement" }`
 - `posts engagement <post>` →
   `{ "activity_id", "url", "author", "content", "engagement", "comments" }`
 - `posts comments <post> [--limit N]` →
@@ -127,7 +129,7 @@ structured file attachments from the admin inbox attachment rows. Attachment URL
 are LinkedIn signed URLs and may expire.
 
 Read-only commands: `whoami`, `search`, `profile`, `status`, `inbox`, `thread`,
-`notifications`, `jobs search`, `jobs saved`, `jobs show`, `posts profile`,
+`notifications`, `jobs search`, `jobs saved`, `jobs show`, `posts profile`, `posts search`,
 `posts show`, `posts engagement`, `posts comments`, `posts scheduled`, `page list`, `page posts`,
 `page post`, `page post-scheduled`, `page inbox`, `page thread`.
 

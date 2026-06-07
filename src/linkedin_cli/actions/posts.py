@@ -2,6 +2,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+import json
 from urllib.parse import unquote, urlencode, urljoin, urlparse
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -13,6 +14,7 @@ from linkedin_cli.url_utils import public_id_to_url, url_to_public_id
 ACTIVITY_RE = re.compile(r"urn:li:(?:activity|share):(\d+)|activity-(\d+)")
 COMMENT_RE = re.compile(r"(?:fsd_)?comment:\((\d+),urn:li:activity:\d+\)|comment:\(activity:\d+,(\d+)\)")
 REACTIONS = {"like", "celebrate", "support", "love", "insightful", "funny"}
+CONTENT_SEARCH_SORTS = {"latest": "date_posted", "top-match": "relevance"}
 
 SELECTORS = {
     "post": (
@@ -20,6 +22,8 @@ SELECTORS = {
         'div[data-urn*="urn:li:activity"], '
         'div[data-id*="urn:li:activity"]'
     ),
+    "search_post_links": 'main a[href*="/feed/update/"]',
+    "search_post_cards": 'main div:has-text("Feed post")',
     "comment": (
         'article.comments-comment-item, '
         'div.comments-comment-item, '
@@ -172,6 +176,42 @@ def _profile_activity_url(handle: str, *, page: int = 1) -> str:
     return f"{url}?{urlencode(params)}" if params else url
 
 
+def _json_facet(values) -> str:
+    return json.dumps(list(values), separators=(",", ":"))
+
+
+def _content_search_url(
+    keywords: str,
+    *,
+    page: int = 1,
+    sort: str | None = None,
+    date_posted: str | None = None,
+    content_type: str | None = None,
+    from_member: list[str] | None = None,
+    posted_by: list[str] | None = None,
+    author_company: list[str] | None = None,
+    author_job_title: str | None = None,
+) -> str:
+    params = {"keywords": keywords, "origin": "FACETED_SEARCH"}
+    if sort:
+        params["sortBy"] = _json_facet([CONTENT_SEARCH_SORTS[sort]])
+    if date_posted:
+        params["datePosted"] = _json_facet([date_posted])
+    if content_type:
+        params["contentType"] = _json_facet([content_type])
+    if from_member:
+        params["fromMember"] = _json_facet(from_member)
+    if posted_by:
+        params["postedBy"] = _json_facet(posted_by)
+    if author_company:
+        params["authorCompany"] = _json_facet(author_company)
+    if author_job_title:
+        params["authorJobTitle"] = author_job_title
+    if page > 1:
+        params["page"] = str(page)
+    return "https://www.linkedin.com/search/results/content/?" + urlencode(params)
+
+
 def _text_lines(text: str) -> list[str]:
     seen = set()
     lines = []
@@ -213,13 +253,66 @@ def _engagement_from_text(text: str) -> dict:
     }
 
 
+def _connection_degree_from_lines(lines: list[str]) -> str | None:
+    for line in lines[:10]:
+        match = re.search(r"\b(1st|2nd|3rd\+?)(?=$|\s|\u2022)", line)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _post_time_from_lines(lines: list[str]) -> tuple[str | None, bool]:
+    for line in lines[:12]:
+        match = re.search(r"\b(\d+\s*(?:mo|yr|s|m|h|d|w|y))\b", line, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).replace(" ", ""), "edited" in line.lower()
+    return None, False
+
+
+def _author_url(page, locator) -> str | None:
+    for link in locator.locator('a[href*="/in/"]').all():
+        href = link.get_attribute("href")
+        if href:
+            return _clean_url(page.url, href)
+    for link in locator.locator('a[href*="/company/"][href*="/posts/"]').all():
+        href = link.get_attribute("href")
+        if href:
+            return _clean_url(page.url, href)
+    return None
+
+
+def _visibility(locator) -> str | None:
+    for item in locator.locator('[aria-label^="Visibility:"]').all():
+        label = item.get_attribute("aria-label") or ""
+        if label.startswith("Visibility:"):
+            return label.removeprefix("Visibility:").strip() or None
+    return None
+
+
 def _author_from_lines(lines: list[str]) -> str | None:
-    skip = {"Follow", "Following", "Connect", "1st", "2nd", "3rd"}
+    skip = {"Feed post", "Follow", "Following", "Connect", "1st", "2nd", "3rd"}
     for line in lines[:8]:
         if line in skip or line.startswith(("Follow ", "Connect ", "Feed post number")):
             continue
         if len(line) <= 120:
             return line
+    return None
+
+
+def _author_headline_from_lines(lines: list[str], author: str | None) -> str | None:
+    if not author or author not in lines:
+        return None
+    for line in lines[lines.index(author) + 1:12]:
+        lower = line.lower()
+        if line in {"Follow", "Following", "Connect"} or line.startswith("•"):
+            continue
+        if re.search(r"\b(1st|2nd|3rd\+?)(?=$|\s|\u2022)", line):
+            continue
+        if re.search(r"\b\d+\s*(?:mo|yr|s|m|h|d|w|y)\b", line, flags=re.IGNORECASE):
+            break
+        if "verified profile" in lower:
+            continue
+        return line
     return None
 
 
@@ -237,7 +330,10 @@ def _content_from_lines(lines: list[str]) -> str | None:
     }
     start = 1
     for index, line in enumerate(lines):
-        if "Visible to" in line or line == "Feed post" or re.search(r"\b\d+[smhdwoyr]o\b", line):
+        if line == "Feed post":
+            start = index + 1
+            continue
+        if "Visible to" in line or re.search(r"\b\d+[smhdwmy](?:o)?\b", line):
             start = index + 1
             break
 
@@ -265,7 +361,7 @@ def _content_from_lines(lines: list[str]) -> str | None:
         if line.replace(",", "").isdigit() and index + 1 < len(visible_lines):
             if re.search(r"\band\s+\d[\d,]*\s+others?", visible_lines[index + 1], flags=re.IGNORECASE):
                 break
-        if line.startswith("•") or re.fullmatch(r"\d+[smhdwoyr]o\s*•?", line):
+        if line.startswith("•") or re.fullmatch(r"\d+[smhdwmy](?:o)?\s*•?", line):
             continue
         if line in stop_words or lower.endswith("reactions") or lower.endswith("comments") or lower.endswith("reposts"):
             continue
@@ -288,11 +384,22 @@ def _post_from_locator(page, locator) -> dict:
         url = _clean_url(page.url, hrefs[0])
     elif activity_id:
         url = f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}/"
+    author = _author_from_lines(lines)
+    author_url = _author_url(page, locator)
+    posted_at, edited = _post_time_from_lines(lines)
 
     return {
         "activity_id": activity_id,
         "url": url,
-        "author": _author_from_lines(lines),
+        "author": author,
+        "author_url": author_url,
+        "author_public_identifier": url_to_public_id(author_url) if author_url else None,
+        "author_headline": _author_headline_from_lines(lines, author),
+        "connection_degree": _connection_degree_from_lines(lines),
+        "posted_at": posted_at,
+        "edited": edited,
+        "edited_at": posted_at if edited else None,
+        "visibility": _visibility(locator),
         "content": _content_from_lines(lines),
         "engagement": _engagement_from_text(text),
     }
@@ -305,6 +412,49 @@ def _visible_posts(page, *, limit: int) -> list[dict]:
         if not post.get("activity_id"):
             continue
         key = post.get("activity_id") or post.get("url") or post.get("content")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        posts.append(post)
+        if len(posts) >= limit:
+            break
+    if len(posts) >= limit:
+        return posts
+
+    for link in page.locator(SELECTORS["search_post_links"]).all():
+        href = link.get_attribute("href") or ""
+        activity_id = _activity_id(href)
+        if not activity_id or activity_id in seen:
+            continue
+        card = link.locator("xpath=ancestor::div[2]")
+        post = _post_from_locator(page, card.first if card.count() > 0 else link)
+        if not post.get("activity_id"):
+            post["activity_id"] = activity_id
+        if not post.get("url"):
+            post["url"] = _clean_url(page.url, href)
+        key = post.get("activity_id") or post.get("url")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        posts.append(post)
+        if len(posts) >= limit:
+            break
+    if len(posts) >= limit:
+        return posts
+
+    for locator in page.locator(SELECTORS["search_post_cards"]).all():
+        text = locator.inner_text().strip()
+        if not text or text.count("Feed post") != 1:
+            continue
+        lines = _text_lines(text)
+        if not lines or lines[0] != "Feed post":
+            continue
+        if not all(label in lines for label in ("Like", "Comment", "Repost", "Send")):
+            continue
+        post = _post_from_locator(page, locator)
+        key = post.get("activity_id") or post.get("url") or "\n".join(
+            x for x in (post.get("author"), post.get("content")) if x
+        )[:800]
         if not key or key in seen:
             continue
         seen.add(key)
@@ -326,6 +476,54 @@ def profile_posts(session: "LinkedInSession", handle: str, *, page: int = 1, lim
     )
     public_id = url_to_public_id(handle) if "/" in handle else handle
     return {"public_identifier": public_id, "page": page, "posts": _visible_posts(session.page, limit=limit)}
+
+
+def search_posts(
+    session: "LinkedInSession",
+    keywords: str,
+    *,
+    page: int = 1,
+    limit: int = 10,
+    sort: str | None = None,
+    date_posted: str | None = None,
+    content_type: str | None = None,
+    from_member: list[str] | None = None,
+    posted_by: list[str] | None = None,
+    author_company: list[str] | None = None,
+    author_job_title: str | None = None,
+) -> dict:
+    """Search LinkedIn content/posts and return visible result cards."""
+    session.ensure_browser()
+    goto_page(
+        session,
+        action=lambda: session.page.goto(_content_search_url(
+            keywords,
+            page=page,
+            sort=sort,
+            date_posted=date_posted,
+            content_type=content_type,
+            from_member=from_member,
+            posted_by=posted_by,
+            author_company=author_company,
+            author_job_title=author_job_title,
+        ), wait_until="domcontentloaded"),
+        expected_url_pattern="/search/results/content/",
+        error_message="Failed to reach content search results",
+    )
+    return {
+        "query": keywords,
+        "page": page,
+        "filters": {
+            "sort": sort,
+            "date_posted": date_posted,
+            "content_type": content_type,
+            "from_member": from_member or [],
+            "posted_by": posted_by or [],
+            "author_company": author_company or [],
+            "author_job_title": author_job_title,
+        },
+        "posts": _visible_posts(session.page, limit=limit),
+    }
 
 
 def show_post(session: "LinkedInSession", post_id_or_url: str) -> dict:

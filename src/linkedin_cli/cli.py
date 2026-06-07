@@ -383,6 +383,7 @@ _HUMAN = {
     "jobs-unsave": _human_jobs_save,
     "jobs-apply": _human_jobs_apply,
     "posts-profile": _human_posts,
+    "posts-search": _human_posts,
     "posts-show": _human_post,
     "posts-engagement": _human_post,
     "posts-comments": _human_comments,
@@ -571,6 +572,24 @@ def _verb_posts_profile(session, args) -> dict:
     from linkedin_cli.actions.posts import profile_posts
 
     return profile_posts(session, args.handle, page=args.page, limit=args.limit)
+
+
+def _verb_posts_search(session, args) -> dict:
+    from linkedin_cli.actions.posts import search_posts
+
+    return search_posts(
+        session,
+        args.keywords,
+        page=args.page,
+        limit=args.limit,
+        sort=args.sort,
+        date_posted=args.date_posted,
+        content_type=args.content_type,
+        from_member=args.from_member,
+        posted_by=args.posted_by,
+        author_company=args.author_company,
+        author_job_title=args.author_job_title,
+    )
 
 
 def _verb_posts_show(session, args) -> dict:
@@ -773,6 +792,7 @@ _VERBS = {
     "jobs-unsave": _verb_jobs_unsave,
     "jobs-apply": _verb_jobs_apply,
     "posts-profile": _verb_posts_profile,
+    "posts-search": _verb_posts_search,
     "posts-show": _verb_posts_show,
     "posts-engagement": _verb_posts_engagement,
     "posts-comments": _verb_posts_comments,
@@ -956,6 +976,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_posts_profile.add_argument("handle", help=handle_help)
     p_posts_profile.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
     p_posts_profile.add_argument("--limit", type=int, default=10, help="Maximum visible posts to return (default: 10)")
+
+    p_posts_search = posts_sub.add_parser("search", parents=[common], help="Search LinkedIn content/posts by keyword")
+    p_posts_search.add_argument("keywords", help="Search keywords, e.g. 'AI Developer Melbourne'")
+    p_posts_search.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
+    p_posts_search.add_argument("--limit", type=int, default=10, help="Maximum visible posts to return (default: 10)")
+    p_posts_search.add_argument("--sort", choices=["latest", "top-match"], help="Sort results by latest or top match")
+    p_posts_search.add_argument("--date-posted", choices=["past-24h", "past-week", "past-month"], help="Filter by when the post was published")
+    p_posts_search.add_argument("--content-type", choices=["videos", "photos", "jobs", "liveVideos", "documents"], help="Filter by content type")
+    p_posts_search.add_argument("--from-member", action="append", default=[], help="Author member URN id to filter by (repeatable)")
+    p_posts_search.add_argument("--posted-by", action="append", choices=["me", "first", "following"], default=[], help="Filter by poster relationship (repeatable): me / first / following")
+    p_posts_search.add_argument("--author-company", action="append", default=[], help="Author company id to filter by (repeatable)")
+    p_posts_search.add_argument("--author-job-title", help="Author job title keyword filter")
 
     posts_handle_help = "LinkedIn activity id, activity/share URN, or /feed/update/... URL"
     posts_sub.add_parser("show", parents=[common], help="Show visible post content and aggregate engagement").add_argument("post", help=posts_handle_help)
