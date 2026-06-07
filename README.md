@@ -86,7 +86,7 @@ so you can clear it by hand, then carry on.
 |---|---|---|
 | `login` | Authenticate the session (creds from env), clear checkpoints, discover your own profile | `{account, self}` |
 | `whoami` | Who is this session logged in as (no login flow) | `{self}` |
-| `search <kw> [--network first/second/third] [--page N]` | People search → matching profile handles | `{query, page, network, profiles[]}` |
+| `search <kw> [--network first/second/third] [--page N] [--limit N] [facets]` | People search → visible profile cards | `{query, page, network, filters, profiles[]}` |
 | `profile <id>` | Scrape a profile (positions, education, location, …); `--raw` adds the raw Voyager blob | full `LinkedInProfile` |
 | `status <id>` | Connection state | `{public_identifier, state}` |
 | `connect <id>` | Send a connection request (no note) | `{public_identifier, state}` |
@@ -131,6 +131,36 @@ need the internal member `urn` (`message`/`thread`/`status`) resolve it for you.
 For recent personal messaging workflows, `inbox` returns `thread_id`; pass it to
 `thread --thread-id <thread_id>` to read that conversation without resolving a
 profile handle.
+
+People search reads visible LinkedIn result cards and supports LinkedIn facet ids
+directly. Use `--limit` to cap how many visible cards are returned from the page.
+Repeatable facets can be passed more than once:
+
+```bash
+linkedin-cli search "head of growth" \
+  --network first \
+  --limit 5 \
+  --geo-urn 100992797 \
+  --current-company 1035 \
+  --current-company 3690 \
+  --verified \
+  --json
+```
+
+Supported people-search facets map to LinkedIn URL parameters as follows:
+`--geo-urn` → `geoUrn`, `--current-company` → `currentCompany`, `--verified` →
+`isVerified`, `--connection-of` → `connectionOf`, `--follower-of` → `followerOf`,
+`--past-company` → `pastCompany`, `--school` → `schoolFilter`, `--industry` →
+`industry`, `--profile-language` → `profileLanguage`, `--open-to-volunteer` →
+`openToVolunteer`, and `--service-category` → `serviceCategory`.
+
+People search JSON includes `filters` plus `profiles[]` cards with visible fields:
+`public_identifier`, `url`, `full_name`, `headline`, `location`,
+`connection_degree`, `profile_image_url`, `verified`, `can_message`,
+`can_connect`, `can_follow`, `followers`, `followers_text`,
+`mutual_connections`, and `mutual_connections_text`. Search result cards do not
+include a member `urn`; call `profile`, `status`, `message`, or `thread` with the
+returned `public_identifier` when a follow-up command needs to resolve it.
 
 Personal messages support file attachments with repeatable `--attachment PATH`.
 `thread --json` returns each message as `{sender, text, timestamp, attachments}`.

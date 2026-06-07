@@ -159,7 +159,16 @@ def _human_search(result: dict) -> str:
     if not profiles:
         return "(no results)"
     header = f"{len(profiles)} result(s) on page {result.get('page', 1)}:"
-    return "\n".join([header] + [f"  {p['public_identifier']}" for p in profiles])
+    return "\n".join(
+        [header] + [
+            "  " + " — ".join(x for x in (
+                p.get("public_identifier"),
+                p.get("full_name"),
+                p.get("headline"),
+            ) if x)
+            for p in profiles
+        ]
+    )
 
 
 def _human_jobs_search(result: dict) -> str:
@@ -520,7 +529,24 @@ def _verb_search(session, args) -> dict:
     from linkedin_cli.actions.search import NETWORK_CODES, search_people
 
     codes = [NETWORK_CODES[n] for n in (args.network or [])]
-    return search_people(session, args.keywords, page=args.page, network=codes or None)
+    return search_people(
+        session,
+        args.keywords,
+        page=args.page,
+        network=codes or None,
+        limit=args.limit,
+        geo_urn=args.geo_urn,
+        current_company=args.current_company,
+        is_verified=args.verified,
+        connection_of=args.connection_of,
+        follower_of=args.follower_of,
+        past_company=args.past_company,
+        school=args.school,
+        industry=args.industry,
+        profile_language=args.profile_language,
+        open_to_volunteer=args.open_to_volunteer,
+        service_category=args.service_category,
+    )
 
 
 def _verb_jobs_search(session, args) -> dict:
@@ -944,6 +970,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--network", action="append", choices=["first", "second", "third"],
                            help="Filter by connection degree (repeatable): first / second / third")
     p_search.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
+    p_search.add_argument("--limit", type=int, default=10, help="Maximum visible profiles to return (default: 10)")
+    p_search.add_argument("--geo-urn", action="append", default=[], help="LinkedIn geoUrn id filter (repeatable)")
+    p_search.add_argument("--current-company", action="append", default=[], help="Current company id filter (repeatable)")
+    p_search.add_argument("--verified", action="store_true", help="Only show verified profiles")
+    p_search.add_argument("--connection-of", action="append", default=[], help="Member URN id whose connections should match (repeatable)")
+    p_search.add_argument("--follower-of", action="append", default=[], help="Member URN id whose followers should match (repeatable)")
+    p_search.add_argument("--past-company", action="append", default=[], help="Past company id filter (repeatable)")
+    p_search.add_argument("--school", action="append", default=[], help="School id filter (repeatable)")
+    p_search.add_argument("--industry", action="append", default=[], help="Industry id filter (repeatable)")
+    p_search.add_argument("--profile-language", action="append", default=[], help="Profile language code filter, e.g. en or pt (repeatable)")
+    p_search.add_argument("--open-to-volunteer", action="store_true", help="Only show profiles open to volunteering")
+    p_search.add_argument("--service-category", action="append", default=[], help="Service category id filter (repeatable)")
 
     jobs_cmd = sub.add_parser("jobs", help="Search, save, and apply to LinkedIn jobs")
     jobs_sub = jobs_cmd.add_subparsers(dest="jobs_cmd", required=True)

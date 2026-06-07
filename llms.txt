@@ -37,8 +37,8 @@ company pages the session can administer before calling company page commands.
 
 - `login` → `{ "account": str, "self": { "public_identifier", "urn", "full_name" } }`
 - `whoami` → `{ "self": { "public_identifier", "urn", "full_name" } }`
-- `search <keywords> [--network first|second|third] [--page N]` →
-  `{ "query", "page", "network": [..], "profiles": [ { "public_identifier", "url" } ] }`
+- `search <keywords> [--network first|second|third] [--page N] [--limit N] [--geo-urn ID ...] [--current-company ID ...] [--verified] [--connection-of URN ...] [--follower-of URN ...] [--past-company ID ...] [--school ID ...] [--industry ID ...] [--profile-language CODE ...] [--open-to-volunteer] [--service-category ID ...]` →
+  `{ "query", "page", "network": [..], "filters", "profiles": [ { "public_identifier", "url", "full_name", "headline", "location", "connection_degree", "profile_image_url", "verified", "can_message", "can_connect", "can_follow", "followers", "followers_text", "mutual_connections", "mutual_connections_text" } ] }`
 - `profile <id> [--raw]` → full LinkedIn profile:
   `{ "url", "urn", "public_identifier", "full_name", "headline", "summary",
      "location_name", "positions": [..], "educations": [..], "connection_degree" }`
@@ -118,6 +118,16 @@ company pages the session can administer before calling company page commands.
   `{ "company_id", "thread_id", "messages": [ { "sender", "timestamp", "text", "attachments": [ { "type": "file", "name", "size", "url", "downloadable" } ] } ] }`
 - `page reply <company-id> <thread-id-or-url> --text <text> [--attachment PATH ...]` →
   `{ "company_id", "thread_id", "sent": bool, "text", "attachments": [PATH], "attached": bool }`
+
+People search notes: `--limit` caps visible result cards returned from the current
+page. Repeatable people facets are raw LinkedIn facet ids/URNs: `--geo-urn` maps
+to `geoUrn`, `--current-company` to `currentCompany`, `--connection-of` to
+`connectionOf`, `--follower-of` to `followerOf`, `--past-company` to
+`pastCompany`, `--school` to `schoolFilter`, `--industry` to `industry`,
+`--profile-language` to `profileLanguage`, and `--service-category` to
+`serviceCategory`. Boolean facets: `--verified` maps to `isVerified=["true"]`,
+and `--open-to-volunteer` maps to `openToVolunteer=["true"]`. Search cards do
+not include member `urn`; use returned `public_identifier` in follow-up commands.
 
 Messaging notes: `--attachment` is repeatable. Personal `inbox` lists recent
 messaging conversations through Voyager. Personal `thread` reads messages
