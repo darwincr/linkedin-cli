@@ -100,6 +100,13 @@ SELECTORS = {
         'div[role="menu"] span:has-text("Delete"), '
         'div[role="menu"] button:has-text("Delete")'
     ),
+    "edit_menu": (
+        '[role="menuitem"]:has-text("Edit post"), '
+        'div[role="menu"] span:has-text("Edit post"), '
+        'div[role="menu"] button:has-text("Edit post"), '
+        'div[role="menu"] span:has-text("Edit"), '
+        'div[role="menu"] button:has-text("Edit")'
+    ),
     "confirm_delete": (
         'button:has-text("Delete"), '
         'button[aria-label*="Delete" i]'
@@ -718,6 +725,32 @@ def _set_text(session, text: str) -> None:
         raise RuntimeError("Could not enter text into LinkedIn post composer")
 
 
+def _replace_text(session, text: str) -> None:
+    editor = _first_visible(session.page, SELECTORS["editor"])
+    editor.click(force=True)
+    session.page.keyboard.press("ControlOrMeta+A")
+    session.page.keyboard.press("Backspace")
+    session.page.keyboard.insert_text(text)
+    session.wait(0.5, 1.0)
+    if text in _visible_composer_text(session):
+        return
+    editor.evaluate(
+        """(element, value) => {
+            element.focus();
+            element.textContent = value;
+            element.dispatchEvent(new InputEvent("input", {
+                bubbles: true,
+                inputType: "insertText",
+                data: value,
+            }));
+        }""",
+        text,
+    )
+    session.wait(0.5, 1.0)
+    if text not in _visible_composer_text(session):
+        raise RuntimeError("Could not replace text in LinkedIn post composer")
+
+
 def _existing_paths(paths: list[str]) -> list[str]:
     resolved = []
     for raw in paths:
@@ -978,6 +1011,23 @@ def delete_post(session: "LinkedInSession", post_id_or_url: str) -> dict:
         raise RuntimeError("Could not confirm LinkedIn post deletion")
     session.wait(2.0, 4.0)
     return {"deleted": True, "activity_id": post.get("activity_id"), "url": post.get("url")}
+
+
+def edit_post(session: "LinkedInSession", post_id_or_url: str, text: str) -> dict:
+    """Edit the text content of an already-published LinkedIn post."""
+    if not text.strip():
+        raise ValueError("Post text cannot be empty")
+    post = show_post(session, post_id_or_url)
+    if not _click_first(session.page, SELECTORS["overflow"]):
+        raise RuntimeError("Could not open LinkedIn post action menu")
+    if not _click_first(session.page, SELECTORS["edit_menu"]):
+        raise RuntimeError("Could not find LinkedIn post edit action")
+    _first_visible(session.page, SELECTORS["composer"])
+    _replace_text(session, text)
+    if not _click_dialog_button(session, ["Save", "Post"], timeout_ms=8_000):
+        raise RuntimeError("Could not save LinkedIn post edits")
+    session.wait(2.0, 4.0)
+    return {"updated": True, "activity_id": post.get("activity_id"), "url": post.get("url"), "text": text}
 
 
 def list_scheduled_posts(session: "LinkedInSession", open_scheduled_posts=None) -> dict:
@@ -1311,10 +1361,21 @@ def cancel_scheduled_post(session: "LinkedInSession", index: int, open_scheduled
     return {"cancelled": True, **post}
 
 
-def update_scheduled_post_time(session: "LinkedInSession", index: int, scheduled_at: str, open_scheduled_posts=None) -> dict:
-    """Update the scheduled datetime for a scheduled post by 1-based index."""
+def update_scheduled_post_time(
+    session: "LinkedInSession",
+    index: int,
+    scheduled_at: str | None = None,
+    *,
+    text: str | None = None,
+    open_scheduled_posts=None,
+) -> dict:
+    """Update the scheduled datetime and/or text for a scheduled post by 1-based index."""
     if index < 1:
         raise ValueError("Index must be 1-based (1 or higher)")
+    if scheduled_at is None and text is None:
+        raise ValueError("Provide --at, --text, or both")
+    if text is not None and not text.strip():
+        raise ValueError("Post text cannot be empty")
     cards = _scheduled_post_cards(session, open_scheduled_posts=open_scheduled_posts)
     if index > len(cards):
         raise ValueError(f"Only {len(cards)} scheduled post(s) found; index {index} is out of range")
@@ -1332,12 +1393,22 @@ def update_scheduled_post_time(session: "LinkedInSession", index: int, scheduled
     edit_option.click(force=True)
     session.wait(1.0, 2.0)
 
-    _schedule_time(session, scheduled_at)
+    if text is not None:
+        _replace_text(session, text)
+    if scheduled_at is not None:
+        _schedule_time(session, scheduled_at)
     if not _click_dialog_button(session, ["Save", "Post", "Schedule"], timeout_ms=8_000):
-        raise RuntimeError("Could not save updated scheduled post time")
+        raise RuntimeError("Could not save updated scheduled post")
 
     session.wait(2.0, 4.0)
-    return {**post, "updated": True, "previous_scheduled_at": post.get("scheduled_at"), "scheduled_at": scheduled_at}
+    return {
+        **post,
+        "updated": True,
+        "previous_scheduled_at": post.get("scheduled_at"),
+        "scheduled_at": scheduled_at or post.get("scheduled_at"),
+        "previous_content": post.get("content"),
+        "content": text if text is not None else post.get("content"),
+    }
 
 
 def _open_scheduled_post_actions(session: "LinkedInSession", card) -> None:

@@ -284,7 +284,9 @@ def _human_post_write(result: dict) -> str:
     if result.get("scheduled"):
         return f"scheduled for {result.get('scheduled_at')}"
     if result.get("updated"):
-        return f"updated scheduled post {result.get('index')} to {result.get('scheduled_at')}"
+        if result.get("index") is not None:
+            return f"updated scheduled post {result.get('index')} to {result.get('scheduled_at')}"
+        return "updated"
     if result.get("cancelled"):
         return f"cancelled scheduled post {result.get('index')}"
     if result.get("deleted"):
@@ -343,7 +345,9 @@ def _human_page_post_write(result: dict) -> str:
     if result.get("scheduled"):
         return f"scheduled for {result.get('scheduled_at')}"
     if result.get("updated"):
-        return f"updated scheduled page post {result.get('index')} to {result.get('scheduled_at')}"
+        if result.get("index") is not None:
+            return f"updated scheduled page post {result.get('index')} to {result.get('scheduled_at')}"
+        return "updated"
     if result.get("cancelled"):
         return f"cancelled scheduled page post {result.get('index')}"
     if result.get("deleted"):
@@ -397,6 +401,7 @@ _HUMAN = {
     "posts-engagement": _human_post,
     "posts-comments": _human_comments,
     "posts-create": _human_post_write,
+    "posts-edit": _human_post_write,
     "posts-draft": _human_post_write,
     "posts-schedule": _human_post_write,
     "posts-update-schedule": _human_post_write,
@@ -413,6 +418,7 @@ _HUMAN = {
     "page-posts": _human_page_posts,
     "page-post": _human_post,
     "page-post-create": _human_page_post_write,
+    "page-post-edit": _human_page_post_write,
     "page-post-schedule": _human_page_post_write,
     "page-post-update-schedule": _human_page_post_write,
     "page-post-scheduled": _human_page_posts,
@@ -649,6 +655,12 @@ def _verb_posts_create(session, args) -> dict:
     )
 
 
+def _verb_posts_edit(session, args) -> dict:
+    from linkedin_cli.actions.posts import edit_post
+
+    return edit_post(session, args.post, args.text)
+
+
 def _verb_posts_draft(session, args) -> dict:
     from linkedin_cli.actions.posts import draft_post
 
@@ -664,7 +676,7 @@ def _verb_posts_schedule(session, args) -> dict:
 def _verb_posts_update_schedule(session, args) -> dict:
     from linkedin_cli.actions.posts import update_scheduled_post_time
 
-    return update_scheduled_post_time(session, args.index, args.at)
+    return update_scheduled_post_time(session, args.index, args.at, text=args.text)
 
 
 def _verb_posts_scheduled(session, args) -> dict:
@@ -753,6 +765,12 @@ def _verb_page_post_create(session, args) -> dict:
     )
 
 
+def _verb_page_post_edit(session, args) -> dict:
+    from linkedin_cli.actions.page_admin import edit_page_post
+
+    return edit_page_post(session, args.company, args.post, args.text)
+
+
 def _verb_page_post_schedule(session, args) -> dict:
     from linkedin_cli.actions.page_admin import schedule_page_post
 
@@ -762,7 +780,7 @@ def _verb_page_post_schedule(session, args) -> dict:
 def _verb_page_post_update_schedule(session, args) -> dict:
     from linkedin_cli.actions.page_admin import update_page_scheduled_post_time
 
-    return update_page_scheduled_post_time(session, args.company, args.index, args.at)
+    return update_page_scheduled_post_time(session, args.company, args.index, args.at, text=args.text)
 
 
 def _verb_page_post_scheduled(session, args) -> dict:
@@ -823,6 +841,7 @@ _VERBS = {
     "posts-engagement": _verb_posts_engagement,
     "posts-comments": _verb_posts_comments,
     "posts-create": _verb_posts_create,
+    "posts-edit": _verb_posts_edit,
     "posts-draft": _verb_posts_draft,
     "posts-schedule": _verb_posts_schedule,
     "posts-update-schedule": _verb_posts_update_schedule,
@@ -839,6 +858,7 @@ _VERBS = {
     "page-posts": _verb_page_posts,
     "page-post": _verb_page_post,
     "page-post-create": _verb_page_post_create,
+    "page-post-edit": _verb_page_post_edit,
     "page-post-schedule": _verb_page_post_schedule,
     "page-post-update-schedule": _verb_page_post_update_schedule,
     "page-post-scheduled": _verb_page_post_scheduled,
@@ -1007,7 +1027,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_jobs_apply.add_argument("job", help=jobs_handle_help)
     p_jobs_apply.add_argument("--submit", action="store_true", help="Submit only if the first Easy Apply dialog is immediately ready")
 
-    posts_cmd = sub.add_parser("posts", help="Read LinkedIn posts, content, and engagement without creating or engaging")
+    posts_cmd = sub.add_parser("posts", help="Read, create, edit, schedule, and engage with LinkedIn posts")
     posts_sub = posts_cmd.add_subparsers(dest="posts_cmd", required=True)
 
     p_posts_profile = posts_sub.add_parser("profile", parents=[common], help="List visible recent posts for a member profile")
@@ -1042,6 +1062,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_posts_create.add_argument("--poll-question", help="Poll question; defaults to the post text when LinkedIn requires one")
     p_posts_create.add_argument("--poll-option", action="append", default=[], help="Poll option (repeat at least twice to create a poll)")
 
+    p_posts_edit = posts_sub.add_parser("edit", parents=[common], help="Edit the text of an already-published LinkedIn post")
+    p_posts_edit.add_argument("post", help=posts_handle_help)
+    p_posts_edit.add_argument("--text", required=True, help="Replacement post body text")
+
     p_posts_draft = posts_sub.add_parser("draft", parents=[common], help="Write a post, close the composer, and save LinkedIn's draft prompt")
     p_posts_draft.add_argument("--text", required=True, help="Draft body text")
 
@@ -1049,9 +1073,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_posts_schedule.add_argument("--text", required=True, help="Post body text")
     p_posts_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
 
-    p_posts_update_schedule = posts_sub.add_parser("update-schedule", parents=[common], help="Update the scheduled datetime for a scheduled post by 1-based index")
+    p_posts_update_schedule = posts_sub.add_parser("update-schedule", parents=[common], help="Update the scheduled datetime and/or text for a scheduled post by 1-based index")
     p_posts_update_schedule.add_argument("index", type=int, help="1-based index from the scheduled posts list")
-    p_posts_update_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
+    p_posts_update_schedule.add_argument("--at", help="Local ISO datetime, e.g. 2026-06-10T09:30")
+    p_posts_update_schedule.add_argument("--text", help="Replacement post body text")
 
     posts_sub.add_parser("scheduled", parents=[common], help="List scheduled posts")
 
@@ -1110,15 +1135,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_page_post_create.add_argument("--poll-question", help="Poll question; defaults to the post text when LinkedIn requires one")
     p_page_post_create.add_argument("--poll-option", action="append", default=[], help="Poll option (repeat at least twice to create a poll)")
 
+    p_page_post_edit = page_sub.add_parser("post-edit", parents=[common], help="Edit the text of an already-published company page post")
+    p_page_post_edit.add_argument("company", help=company_help)
+    p_page_post_edit.add_argument("post", help=posts_handle_help)
+    p_page_post_edit.add_argument("--text", required=True, help="Replacement post body text")
+
     p_page_post_schedule = page_sub.add_parser("post-schedule", parents=[common], help="Schedule a company page text post for a specific local datetime")
     p_page_post_schedule.add_argument("company", help=company_help)
     p_page_post_schedule.add_argument("--text", required=True, help="Post body text")
     p_page_post_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
 
-    p_page_post_update_schedule = page_sub.add_parser("post-update-schedule", parents=[common], help="Update the scheduled datetime for a company page post by 1-based index")
+    p_page_post_update_schedule = page_sub.add_parser("post-update-schedule", parents=[common], help="Update the scheduled datetime and/or text for a company page post by 1-based index")
     p_page_post_update_schedule.add_argument("company", help=company_help)
     p_page_post_update_schedule.add_argument("index", type=int, help="1-based index from the scheduled page posts list")
-    p_page_post_update_schedule.add_argument("--at", required=True, help="Local ISO datetime, e.g. 2026-06-10T09:30")
+    p_page_post_update_schedule.add_argument("--at", help="Local ISO datetime, e.g. 2026-06-10T09:30")
+    p_page_post_update_schedule.add_argument("--text", help="Replacement post body text")
 
     p_page_post_scheduled = page_sub.add_parser("post-scheduled", parents=[common], help="List scheduled company page posts")
     p_page_post_scheduled.add_argument("company", help=company_help)
@@ -1160,6 +1191,10 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "thread" and not (args.handle or args.thread_id):
         parser.error("thread requires a profile handle/URL or --thread-id")
+    if args.cmd == "posts" and args.posts_cmd == "update-schedule" and not (args.at or args.text):
+        parser.error("posts update-schedule requires --at, --text, or both")
+    if args.cmd == "page" and args.page_cmd == "post-update-schedule" and not (args.at or args.text):
+        parser.error("page post-update-schedule requires --at, --text, or both")
     _configure_logging(json_mode=getattr(args, "json", False))
 
     if args.cmd == "session":

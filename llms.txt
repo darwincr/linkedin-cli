@@ -37,6 +37,8 @@ company pages the session can administer before calling company page commands.
 
 - `login` → `{ "account": str, "self": { "public_identifier", "urn", "full_name" } }`
 - `whoami` → `{ "self": { "public_identifier", "urn", "full_name" } }`
+- `session open` → launches and binds the persistent browser session, prints the websocket endpoint, then blocks until stopped.
+- `session close` → `{ "name", "closed": bool }`
 - `search <keywords> [--network first|second|third] [--page N] [--limit N] [--geo-urn ID ...] [--current-company ID ...] [--verified] [--connection-of URN ...] [--follower-of URN ...] [--past-company ID ...] [--school ID ...] [--industry ID ...] [--profile-language CODE ...] [--open-to-volunteer] [--service-category ID ...]` →
   `{ "query", "page", "network": [..], "filters", "profiles": [ { "public_identifier", "url", "full_name", "headline", "location", "connection_degree", "profile_image_url", "verified", "can_message", "can_connect", "can_follow", "followers", "followers_text", "mutual_connections", "mutual_connections_text" } ] }`
 - `profile <id> [--raw]` → full LinkedIn profile:
@@ -48,7 +50,7 @@ company pages the session can administer before calling company page commands.
   `{ "public_identifier", "sent": bool, "attachments": [PATH] }`
 - `inbox [--limit N]` →
   `{ "conversations": [ { "thread_id", "entity_urn", "url", "participants": [ { "name", "public_identifier", "urn" } ], "last_message", "last_activity_at", "unread_count" } ] }`
-- `thread <id> [--thread-id T] [--limit N]` →
+- `thread [<id>] [--thread-id T] [--limit N]` →
   by profile id: `{ "public_identifier", "messages": [ { "sender", "text", "timestamp", "attachments": [ { "type": "file", "name", "media_type", "byte_size", "asset_urn", "url" } ] } ] }`; by inbox thread id: `{ "thread_id", "messages": [ ... ] }`
 - `notifications [--limit N]` →
   `{ "notifications": [ { "unread", "actor", "text", "url", "activity_id", "comment_id", "links" } ] }`
@@ -63,7 +65,7 @@ company pages the session can administer before calling company page commands.
 - `jobs show <job>` →
   `{ "job_id", "url", "title", "company", "location", "listed", "applicants", "workplace", "employment_type", "saved", "apply_method", "apply_url", "external_url", "ats", "description" }`
 - `jobs save <job>` → `{ "job_id", "url", "saved": bool, "changed": bool }`
-- `jobs unsave <job>` → `{ "job_id", "url", "saved": bool, "changed": bool }`
+- `jobs unsave <job> [<job> ...]` → one job: `{ "job_id", "url", "saved": bool, "changed": bool }`; multiple jobs: `{ "jobs": [ { "job_id", "url", "saved", "changed" } ] }`
 - `jobs apply <job> [--submit]` →
   `{ "job_id", "url", "method": "external"|"easy_apply"|null, "submitted": bool, "manual": bool, "apply_url", "external_url", "ats", ... }`
 - `posts profile <id> [--page N] [--limit N]` →
@@ -76,13 +78,14 @@ company pages the session can administer before calling company page commands.
   `{ "activity_id", "url", "author", "content", "engagement", "comments" }`
 - `posts comments <post> [--limit N]` →
   `{ "activity_id", "url", "comments": [ { "comment_id", "author", "profile_url", "text", "reactions" } ] }`
-- `posts create --text <text> [--image PATH] [--document PATH] [--poll-option O ...]` →
-  `{ "posted": bool, "text", "images", "documents", "poll" }`
+- `posts create --text <text> [--image PATH ...] [--document PATH ...] [--poll-question Q] [--poll-option O ...]` →
+  `{ "posted": bool, "text", "images", "documents", "poll", "uploaded_images", "uploaded_documents" }`
+- `posts edit <post> --text <text>` → `{ "updated": bool, "activity_id", "url", "text" }`
 - `posts draft --text <text>` → `{ "drafted": bool, "text" }`
 - `posts schedule --text <text> --at YYYY-MM-DDTHH:MM` →
   `{ "scheduled": bool, "scheduled_at", "text" }`
-- `posts update-schedule <index> --at YYYY-MM-DDTHH:MM` →
-  `{ "updated": bool, "index", "activity_id", "previous_scheduled_at", "scheduled_at", "scheduled_label", "content" }`
+- `posts update-schedule <index> [--at YYYY-MM-DDTHH:MM] [--text <text>]` →
+  `{ "updated": bool, "index", "activity_id", "previous_scheduled_at", "scheduled_at", "scheduled_label", "previous_content", "content" }`
 - `posts scheduled` →
   `{ "scheduled_posts": [ { "index", "activity_id", "scheduled_at", "scheduled_label", "content" } ] }`
 - `posts cancel <index>` →
@@ -100,12 +103,13 @@ company pages the session can administer before calling company page commands.
   `{ "company_id", "tab": "published", "posts": [ { "activity_id", "url", "content", "engagement" } ] }`
 - `page post <company-id> <post>` →
   `{ "activity_id", "url", "author", "content", "engagement" }`
-- `page post-create <company-id> --text <text> [--image PATH] [--document PATH] [--poll-option O ...]` →
+- `page post-create <company-id> --text <text> [--image PATH ...] [--document PATH ...] [--poll-question Q] [--poll-option O ...]` →
   `{ "company_id", "posted": bool, "text", "images", "documents", "poll", "uploaded_images", "uploaded_documents" }`
+- `page post-edit <company-id> <post> --text <text>` → `{ "company_id", "activity_id", "updated": bool, "text" }`
 - `page post-schedule <company-id> --text <text> --at YYYY-MM-DDTHH:MM` →
   `{ "company_id", "scheduled": bool, "scheduled_at", "text" }`
-- `page post-update-schedule <company-id> <index> --at YYYY-MM-DDTHH:MM` →
-  `{ "company_id", "updated": bool, "index", "activity_id", "previous_scheduled_at", "scheduled_at", "scheduled_label", "content" }`
+- `page post-update-schedule <company-id> <index> [--at YYYY-MM-DDTHH:MM] [--text <text>]` →
+  `{ "company_id", "updated": bool, "index", "activity_id", "previous_scheduled_at", "scheduled_at", "scheduled_label", "previous_content", "content" }`
 - `page post-scheduled <company-id>` →
   `{ "company_id", "scheduled_posts": [ { "index", "activity_id", "scheduled_at", "scheduled_label", "content" } ] }`
 - `page post-cancel <company-id> <index>` →
@@ -143,11 +147,15 @@ Read-only commands: `whoami`, `search`, `profile`, `status`, `inbox`, `thread`,
 `posts show`, `posts engagement`, `posts comments`, `posts scheduled`, `page list`, `page posts`,
 `page post`, `page post-scheduled`, `page inbox`, `page thread`.
 
+Lifecycle commands: `session open` starts a long-lived local browser owner and
+prints a websocket endpoint rather than JSON; `session close` stops that local
+browser owner and returns JSON with `--json`.
+
 Commands that change LinkedIn state: `connect`, `message`, `jobs save`,
 `jobs unsave`, `jobs apply --submit`, `notifications reply`, `notifications react`,
-`posts create`, `posts draft`, `posts schedule`, `posts update-schedule`, `posts cancel`, `posts delete`, `posts react`,
+`posts create`, `posts edit`, `posts draft`, `posts schedule`, `posts update-schedule`, `posts cancel`, `posts delete`, `posts react`,
 `posts comment-reply`, `posts comment-react`, `page post-create`,
-`page post-schedule`, `page post-update-schedule`, `page post-cancel`, `page post-delete`, `page reply`.
+`page post-edit`, `page post-schedule`, `page post-update-schedule`, `page post-cancel`, `page post-delete`, `page reply`.
 
 ## Errors
 
@@ -162,8 +170,9 @@ or inbox → thread --thread-id for recent personal messaging workflows.
 Engagement: notifications → reply/react by notification index, or posts comments →
 posts comment-reply/comment-react when a comment id is available.
 Company pages: page list → choose company_id → page posts/page post/page post-scheduled
-for read-only inspection; page post-create/page post-schedule/page post-cancel/page
-post-delete for page content management; page inbox/page thread/page reply for company page inbox workflows.
+for read-only inspection; page post-create/page post-edit/page post-schedule/page
+post-update-schedule/page post-cancel/page post-delete for page content management;
+page inbox/page thread/page reply for company page inbox workflows.
 
 ## More
 

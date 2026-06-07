@@ -66,6 +66,14 @@ SELECTORS = {
         'div[role="menu"] button:has-text("Delete"), '
         'div[role="menu"] span:has-text("Delete")'
     ),
+    "edit_menu": (
+        '[role="menuitem"]:has-text("Edit post"), '
+        '[role="menuitem"]:has-text("Edit"), '
+        'div[role="menu"] button:has-text("Edit post"), '
+        'div[role="menu"] span:has-text("Edit post"), '
+        'div[role="menu"] button:has-text("Edit"), '
+        'div[role="menu"] span:has-text("Edit")'
+    ),
     "confirm_delete": 'button:has-text("Delete"), button[aria-label*="Delete" i]',
     "message": (
         'div.org-inbox-message__container, '
@@ -474,11 +482,11 @@ def cancel_page_scheduled_post(session: "LinkedInSession", company_id: str, inde
     return {"company_id": company_id, **result}
 
 
-def update_page_scheduled_post_time(session: "LinkedInSession", company_id: str, index: int, scheduled_at: str) -> dict:
-    """Update the scheduled datetime for a company page post by 1-based index."""
+def update_page_scheduled_post_time(session: "LinkedInSession", company_id: str, index: int, scheduled_at: str | None = None, *, text: str | None = None) -> dict:
+    """Update the scheduled datetime and/or text for a company page post by 1-based index."""
     from linkedin_cli.actions.posts import update_scheduled_post_time
 
-    result = update_scheduled_post_time(session, index, scheduled_at, open_scheduled_posts=lambda s: _open_page_scheduled_posts(s, company_id))
+    result = update_scheduled_post_time(session, index, scheduled_at, text=text, open_scheduled_posts=lambda s: _open_page_scheduled_posts(s, company_id))
     return {"company_id": company_id, **result}
 
 
@@ -501,6 +509,34 @@ def delete_page_post(session: "LinkedInSession", company_id: str, post_id_or_url
         raise RuntimeError("Could not confirm LinkedIn page post deletion")
     session.wait(2.0, 4.0)
     return {"company_id": company_id, "activity_id": activity_id, "deleted": True}
+
+
+def edit_page_post(session: "LinkedInSession", company_id: str, post_id_or_url: str, text: str) -> dict:
+    """Edit the text content of an already-published company page post."""
+    if not text.strip():
+        raise ValueError("Post text cannot be empty")
+    session.ensure_browser()
+    url = post_id_or_url if post_id_or_url.startswith(("http://", "https://")) else f"https://www.linkedin.com/feed/update/urn:li:activity:{post_id_or_url}/"
+    goto_page(
+        session,
+        action=lambda: session.page.goto(url, wait_until="domcontentloaded"),
+        expected_url_pattern="/feed/update/",
+        error_message="Failed to open company page post",
+    )
+    activity_id = _activity_id(session.page.url) or _activity_id(post_id_or_url)
+    if not _click_first(session.page, SELECTORS["overflow"]):
+        raise RuntimeError("Could not open LinkedIn page post action menu")
+    if not _click_first(session.page, SELECTORS["edit_menu"]):
+        raise RuntimeError("Could not find LinkedIn page post edit action")
+
+    from linkedin_cli.actions.posts import _replace_text
+
+    _first_visible(session.page, SELECTORS["composer"])
+    _replace_text(session, text)
+    if not _click_dialog_button(session, ["Save", "Post"], timeout_ms=8_000):
+        raise RuntimeError("Could not save LinkedIn page post edits")
+    session.wait(2.0, 4.0)
+    return {"company_id": company_id, "activity_id": activity_id, "updated": True, "text": text}
 
 
 def _thread_id_from_url(url: str) -> str | None:
