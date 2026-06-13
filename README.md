@@ -44,6 +44,14 @@ The PyPI package is `linkedin-agent-cli`; the import name is `linkedin_cli`. For
 latest unreleased code, install from git:
 `pip install "linkedin-agent-cli @ git+https://github.com/darwincr/linkedin-cli.git@main"`.
 
+## Docker Install
+
+```bash
+python -m pip install "git+https://github.com/darwincr/linkedin-cli.git@main"
+python -m playwright install chromium
+linkedin-cli --help
+```
+
 ## 🚀 Quickstart
 
 linkedin-cli uses a **bind + connect** model: one long-lived process owns the
