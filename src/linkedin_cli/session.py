@@ -22,8 +22,13 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from playwright.sync_api import BrowserContext, Page, sync_playwright
+from playwright_stealth import Stealth
+
+from linkedin_cli.conf import BROWSER_DEFAULT_TIMEOUT_MS, BROWSER_HEADLESS, BROWSER_SLOW_MO
 
 logger = logging.getLogger(__name__)
+
+LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/"
 
 
 @runtime_checkable
@@ -195,3 +200,82 @@ class PlaywrightCliSession:
 
     def __repr__(self) -> str:
         return f"linkedin-cli-session:{self.name or self.endpoint}"
+
+
+class WorkerLinkedInSession:
+    """A ``LinkedInSession`` backed by one worker-owned persistent profile."""
+
+    def __init__(self, name: str, *, min_pace: float, max_pace: float,
+                 username: str | None = None, password: str | None = None):
+        self.name = name
+        self.min_pace = min_pace
+        self.max_pace = max_pace
+        self.username = username
+        self.password = password
+        self.page = None
+        self.context = None
+        self._playwright_cm = None
+        self._playwright = None
+        self._self_profile = None
+
+    def __enter__(self) -> "WorkerLinkedInSession":
+        self.ensure_browser()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def ensure_browser(self) -> None:
+        if self.page is not None:
+            try:
+                if not self.page.is_closed() and self.context is not None and self.context.browser is not None and self.context.browser.is_connected():
+                    return
+            except Exception:  # noqa: BLE001 - stale Playwright handles can raise varied errors
+                pass
+            self.close()
+
+        profile_dir = linkedin_cli_home() / "profiles" / self.name
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        self._playwright_cm = sync_playwright()
+        self._playwright = self._playwright_cm.__enter__()
+        self.context = self._playwright.chromium.launch_persistent_context(
+            str(profile_dir),
+            headless=BROWSER_HEADLESS,
+            slow_mo=BROWSER_SLOW_MO,
+        )
+        self.context.set_default_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
+        self.context.set_default_navigation_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
+        Stealth().apply_stealth_sync(self.context)
+        self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
+        if not self.page.url.startswith("https://www.linkedin.com/"):
+            self.page.goto(LINKEDIN_FEED_URL)
+            self.page.wait_for_load_state("domcontentloaded")
+        logger.debug("Opened worker browser profile %s", profile_dir)
+
+    @property
+    def self_profile(self) -> dict:
+        if self._self_profile is None:
+            from linkedin_cli.setup.self_profile import discover_self_profile
+            self._self_profile = discover_self_profile(self)
+        return self._self_profile
+
+    def wait(self, min_delay: float | None = None, max_delay: float | None = None) -> None:
+        time.sleep(random.uniform(min_delay or self.min_pace, max_delay or self.max_pace))
+        if self.page:
+            self.page.wait_for_load_state("domcontentloaded")
+
+    def close(self) -> None:
+        try:
+            if self.context:
+                self.context.close()
+            if self._playwright_cm:
+                self._playwright_cm.__exit__(None, None, None)
+        finally:
+            self.page = None
+            self.context = None
+            self._playwright_cm = None
+            self._playwright = None
+            self._self_profile = None
+
+    def __repr__(self) -> str:
+        return f"linkedin-cli-worker-session:{self.name}"

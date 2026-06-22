@@ -1,8 +1,9 @@
-"""linkedin-cli — drive LinkedIn interactions inside a bound browser session.
+"""linkedin-cli — drive LinkedIn interactions inside a persistent browser session.
 
-``session open`` launches + binds a persistent browser (the session owner); the
-verbs connect to it and drive LinkedIn. One session = one account; pick it with
-``--session <name>`` (or ``$LINKEDIN_CLI_SESSION``).
+Verbs auto-start a per-session worker that owns one persistent browser profile
+and reuses it across commands. One session = one account; pick it with
+``--session <name>`` (or ``$LINKEDIN_CLI_SESSION``). ``session open`` remains
+available as a legacy/debug bound-browser launcher.
 
 Output contract — design decisions, kept here so they travel with the package:
 
@@ -881,11 +882,14 @@ def _cmd_session_open(args) -> int:
 
 
 def _cmd_session_close(args) -> int:
+    from linkedin_cli.worker import stop_worker
+
+    stop_worker(args.name)
     with session_lock(args.name):
         record = read_session(args.name)
         if not record:
-            _err(f"error: usage: no open session named {args.name!r}")
-            return 2
+            _render("session-close", {"name": args.name, "closed": True}, args.json)
+            return 0
         try:
             os.kill(record["pid"], signal.SIGTERM)
         except ProcessLookupError:
@@ -897,34 +901,51 @@ def _cmd_session_close(args) -> int:
 
 # ── verb runner ────────────────────────────────────────────────────
 
-def _run_verb(args) -> int:
-    with session_lock(args.name):
-        record = read_session(args.name)
-        if not record:
-            _err(f"error: usage: no open session named {args.name!r} — run "
-                 f"`linkedin-cli session open --session {args.name}`")
-            return 2
+def _execute_verb(args, session) -> int:
+    try:
+        _render(args.verb, _VERBS[args.verb](session, args), args.json)
+        return 0
+    except Exception as exc:  # noqa: BLE001 — map known errors, re-raise the rest
+        error_type = _error_type(exc)
+        if error_type is None:
+            raise
+        _err(f"error: {error_type}: {exc}")
+        return 1
 
-        session = PlaywrightCliSession(
-            record["endpoint"],
-            min_pace=DEFAULT_MIN_PACE_S,
-            max_pace=DEFAULT_MAX_PACE_S,
-            username=os.environ.get("LINKEDIN_USERNAME"),
-            password=os.environ.get("LINKEDIN_PASSWORD"),
-            name=args.name,
-        )
-        try:
-            session.ensure_browser()
-            _render(args.verb, _VERBS[args.verb](session, args), args.json)
-            return 0
-        except Exception as exc:  # noqa: BLE001 — map known errors, re-raise the rest
-            error_type = _error_type(exc)
-            if error_type is None:
-                raise
-            _err(f"error: {error_type}: {exc}")
-            return 1
-        finally:
-            session.close()
+
+def _run_verb_bound(args) -> int:
+    """Run a verb against an explicitly opened legacy bound session."""
+    record = read_session(args.name)
+    if not record:
+        _err(f"error: usage: no open session named {args.name!r} — run "
+             f"`linkedin-cli session open --session {args.name}`")
+        return 2
+
+    session = PlaywrightCliSession(
+        record["endpoint"],
+        min_pace=DEFAULT_MIN_PACE_S,
+        max_pace=DEFAULT_MAX_PACE_S,
+        username=os.environ.get("LINKEDIN_USERNAME"),
+        password=os.environ.get("LINKEDIN_PASSWORD"),
+        name=args.name,
+    )
+    try:
+        session.ensure_browser()
+        return _execute_verb(args, session)
+    finally:
+        session.close()
+
+
+def _run_verb(args, argv: list[str]) -> int:
+    if os.environ.get("LINKEDIN_CLI_WORKER") == "1":
+        return _run_verb_bound(args)
+    if os.environ.get("LINKEDIN_CLI_BOUND") == "1":
+        with session_lock(args.name):
+            return _run_verb_bound(args)
+
+    from linkedin_cli.worker import run_via_worker
+
+    return run_via_worker(args.name, argv)
 
 
 # ── parser ─────────────────────────────────────────────────────────
@@ -947,8 +968,8 @@ def build_parser() -> argparse.ArgumentParser:
     # session open / close
     session_cmd = sub.add_parser("session", help="Manage the bound browser session")
     session_sub = session_cmd.add_subparsers(dest="subcmd", required=True)
-    session_sub.add_parser("open", parents=[common], help="Launch + bind a persistent browser, then block")
-    session_sub.add_parser("close", parents=[common], help="Signal the session launcher to shut down")
+    session_sub.add_parser("open", parents=[common], help="Launch + bind a legacy debug browser, then block")
+    session_sub.add_parser("close", parents=[common], help="Stop the worker or legacy session launcher")
 
     # verbs
     handle_help = "Profile URL or public identifier (e.g. alice-smith)"
@@ -1186,7 +1207,7 @@ def _configure_logging(*, json_mode: bool = False) -> None:
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-def main(argv=None) -> int:
+def _parse_args(argv: list[str]):
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.cmd == "thread" and not (args.handle or args.thread_id):
@@ -1198,8 +1219,7 @@ def main(argv=None) -> int:
     _configure_logging(json_mode=getattr(args, "json", False))
 
     if args.cmd == "session":
-        return _cmd_session_open(args) if args.subcmd == "open" else _cmd_session_close(args)
-
+        return args
     if args.cmd == "jobs":
         args.verb = f"jobs-{args.jobs_cmd}"
     elif args.cmd == "posts":
@@ -1210,7 +1230,15 @@ def main(argv=None) -> int:
         args.verb = f"notifications-{args.notifications_cmd}"
     else:
         args.verb = args.cmd
-    return _run_verb(args)
+    return args
+
+
+def main(argv=None) -> int:
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    args = _parse_args(raw_argv)
+    if args.cmd == "session":
+        return _cmd_session_open(args) if args.subcmd == "open" else _cmd_session_close(args)
+    return _run_verb(args, raw_argv)
 
 
 if __name__ == "__main__":
