@@ -25,6 +25,7 @@ from playwright.sync_api import BrowserContext, Page, sync_playwright
 from playwright_stealth import Stealth
 
 from linkedin_cli.conf import BROWSER_DEFAULT_TIMEOUT_MS, BROWSER_HEADLESS, BROWSER_SLOW_MO
+from linkedin_cli.profile_locks import remove_stale_chromium_locks
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,7 @@ class WorkerLinkedInSession:
 
         profile_dir = linkedin_cli_home() / "profiles" / self.name
         profile_dir.mkdir(parents=True, exist_ok=True)
+        remove_stale_chromium_locks(profile_dir)
         self._playwright_cm = sync_playwright()
         self._playwright = self._playwright_cm.__enter__()
         self.context = self._playwright.chromium.launch_persistent_context(

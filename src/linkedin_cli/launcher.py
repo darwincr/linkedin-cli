@@ -11,11 +11,13 @@ from __future__ import annotations
 import logging
 import os
 import signal
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 
 from linkedin_cli.conf import BROWSER_DEFAULT_TIMEOUT_MS, BROWSER_HEADLESS, BROWSER_SLOW_MO
+from linkedin_cli.profile_locks import remove_stale_chromium_locks
 from linkedin_cli.session import clear_session, write_session
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,7 @@ def open_bound_session(name: str, *, profile_dir: str,
     one container — no cross-container exposure needed).
     """
     os.makedirs(profile_dir, exist_ok=True)
+    remove_stale_chromium_locks(Path(profile_dir))
     with sync_playwright() as pw:
         context = pw.chromium.launch_persistent_context(
             profile_dir, headless=BROWSER_HEADLESS, slow_mo=BROWSER_SLOW_MO,
