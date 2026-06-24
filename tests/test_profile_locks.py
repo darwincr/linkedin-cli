@@ -12,14 +12,34 @@ def test_removes_singleton_files_for_dead_pid(tmp_path):
 
     remove_stale_chromium_locks(tmp_path)
 
-    assert not (tmp_path / "SingletonLock").exists()
-    assert not (tmp_path / "SingletonCookie").exists()
-    assert not (tmp_path / "SingletonSocket").exists()
+    assert not (tmp_path / "SingletonLock").is_symlink()
+    assert not (tmp_path / "SingletonCookie").is_symlink()
+    assert not (tmp_path / "SingletonSocket").is_symlink()
 
 
-def test_keeps_singleton_files_for_running_pid(tmp_path):
-    os.symlink(f"host-{os.getpid()}", tmp_path / "SingletonLock")
+def test_removes_singleton_files_for_non_chromium_running_pid(monkeypatch, tmp_path):
+    import linkedin_cli.profile_locks as profile_locks
+
+    pid = os.getpid()
+    os.symlink(f"host-{pid}", tmp_path / "SingletonLock")
     os.symlink("cookie", tmp_path / "SingletonCookie")
+
+    monkeypatch.setattr(profile_locks, "_process_cmdline", lambda _: ["/usr/bin/python"])
+
+    remove_stale_chromium_locks(tmp_path)
+
+    assert not (tmp_path / "SingletonLock").is_symlink()
+    assert not (tmp_path / "SingletonCookie").is_symlink()
+
+
+def test_keeps_singleton_files_for_chromium_owner(monkeypatch, tmp_path):
+    import linkedin_cli.profile_locks as profile_locks
+
+    pid = os.getpid()
+    os.symlink(f"host-{pid}", tmp_path / "SingletonLock")
+    os.symlink("cookie", tmp_path / "SingletonCookie")
+
+    monkeypatch.setattr(profile_locks, "_process_cmdline", lambda _: ["/opt/chrome", f"--user-data-dir={tmp_path}"])
 
     remove_stale_chromium_locks(tmp_path)
 

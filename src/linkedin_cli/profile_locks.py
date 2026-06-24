@@ -20,6 +20,32 @@ def _pid_is_running(pid: int) -> bool:
     return True
 
 
+def _process_cmdline(pid: int) -> list[str] | None:
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    return [part.decode(errors="replace") for part in raw.split(b"\0") if part]
+
+
+def _pid_owns_profile(pid: int, profile_path: Path) -> bool:
+    if not _pid_is_running(pid):
+        return False
+
+    cmdline = _process_cmdline(pid)
+    if cmdline is None:
+        return True
+
+    executable = Path(cmdline[0]).name.lower() if cmdline else ""
+    if "chrome" not in executable and "chromium" not in executable:
+        return False
+
+    profile = str(profile_path)
+    return any(arg == f"--user-data-dir={profile}" for arg in cmdline)
+
+
 def _lock_pid(profile_path: Path) -> int | None:
     lock_path = profile_path / "SingletonLock"
     if not lock_path.exists() and not lock_path.is_symlink():
@@ -34,7 +60,7 @@ def _lock_pid(profile_path: Path) -> int | None:
 
 def remove_stale_chromium_locks(profile_path: Path) -> None:
     pid = _lock_pid(profile_path)
-    if pid is None or _pid_is_running(pid):
+    if pid is None or _pid_owns_profile(pid, profile_path):
         return
     removed = []
     for name in CHROMIUM_LOCK_FILES:
