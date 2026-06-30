@@ -22,6 +22,7 @@ DUMP_PAGES = False
 # ----------------------------------------------------------------------
 BROWSER_HEADLESS = False  # LinkedIn runs headed (under Xvfb in Docker)
 BROWSER_SLOW_MO = 200
+BROWSER_ARGS = ["--hide-crash-restore-bubble"]
 BROWSER_DEFAULT_TIMEOUT_MS = 30_000
 BROWSER_LOGIN_TIMEOUT_MS = 40_000
 BROWSER_NAV_TIMEOUT_MS = 10_000

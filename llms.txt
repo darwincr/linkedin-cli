@@ -60,8 +60,8 @@ company pages the session can administer before calling company page commands.
   `{ "index", "notification", "activity_id", "comment_id"?, "reaction", "reacted": bool }`
 - `jobs search <keywords> [--location <loc>] [--page N] [--easy-apply] [--remote] [--date-posted past-24h|past-week|past-month] [--job-type full-time|part-time|contract|temporary|internship]` →
   `{ "query", "location", "page", "filters", "jobs": [ { "job_id", "url", "title", "company", "location", "listed" } ] }`
-- `jobs saved [--page N]` →
-  `{ "page", "jobs": [ { "job_id", "url", "title", "company", "location", "listed" } ] }`
+- `jobs saved [--page N] [--limit N] [--type saved|in-progress|applied|archived]` →
+  `{ "page", "type", "limit", "jobs": [ { "job_id", "url", "title", "company", "location", "listed" } ] }`
 - `jobs show <job>` →
   `{ "job_id", "url", "title", "company", "location", "listed", "applicants", "workplace", "employment_type", "saved", "apply_method", "apply_url", "external_url", "ats", "description" }`
 - `jobs save <job>` → `{ "job_id", "url", "saved": bool, "changed": bool }`

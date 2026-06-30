@@ -1,11 +1,18 @@
 import re
-from urllib.parse import urljoin, urlparse
+import time
+from urllib.parse import urlencode, urljoin, urlparse
 
 from linkedin_cli.browser.nav import goto_page
 
 SAVED_JOBS_URL = "https://www.linkedin.com/my-items/saved-jobs/"
 JOB_ID_RE = re.compile(r"/jobs/view/(\d+)")
 JOB_LINKS_SELECTOR = 'a[href*="/jobs/view/"]'
+SAVED_JOB_CARD_TYPES = {
+    "saved": "SAVED",
+    "in-progress": "IN_PROGRESS",
+    "applied": "APPLIED",
+    "archived": "ARCHIVED",
+}
 
 
 def _job_id(job_id_or_url: str) -> str:
@@ -56,14 +63,69 @@ def _job_from_link(page, link) -> dict | None:
     }
 
 
-def _open(session: "LinkedInSession") -> None:
+def _saved_jobs_url(card_type: str) -> str:
+    linked_in_card_type = SAVED_JOB_CARD_TYPES[card_type]
+    if linked_in_card_type == "SAVED":
+        return SAVED_JOBS_URL
+    return SAVED_JOBS_URL + "?" + urlencode({"cardType": linked_in_card_type})
+
+
+def _open(session: "LinkedInSession", *, card_type: str = "saved") -> None:
     session.ensure_browser()
     goto_page(
         session,
-        action=lambda: session.page.goto(SAVED_JOBS_URL),
+        action=lambda: session.page.goto(_saved_jobs_url(card_type)),
         expected_url_pattern="/my-items/saved-jobs/",
         error_message="Failed to reach saved jobs",
     )
+
+
+def _scroll_until_count(page, *, limit: int, timeout_ms: int = 8_000) -> None:
+    deadline = time.monotonic() + timeout_ms / 1000
+    previous_count = -1
+    stable_rounds = 0
+    while time.monotonic() < deadline:
+        count = page.locator(JOB_LINKS_SELECTOR).count()
+        if count >= limit:
+            return
+        stable_rounds = stable_rounds + 1 if count == previous_count else 0
+        if stable_rounds >= 3:
+            return
+        previous_count = count
+        page.mouse.wheel(0, 900)
+        time.sleep(0.5)
+
+
+def _click_page(session: "LinkedInSession", page_number: int) -> None:
+    if page_number <= 1:
+        return
+    button = session.page.locator(f'button[aria-label="Page {page_number}"]').first
+    if button.count() == 0:
+        raise RuntimeError(f"Could not find saved-jobs page {page_number}")
+    button.click()
+    session.wait(1.0, 2.0)
+
+
+def _click_next(session: "LinkedInSession") -> bool:
+    next_button = session.page.locator('button[aria-label="Next"]:not([disabled])').first
+    if next_button.count() == 0:
+        return False
+    next_button.click()
+    session.wait(1.0, 2.0)
+    return True
+
+
+def _visible_jobs(page, seen: set[str], *, remaining: int) -> list[dict]:
+    jobs = []
+    for link in page.locator(JOB_LINKS_SELECTOR).all():
+        job = _job_from_link(page, link)
+        if not job or job["job_id"] in seen:
+            continue
+        seen.add(job["job_id"])
+        jobs.append(job)
+        if len(jobs) >= remaining:
+            break
+    return jobs
 
 
 def _card_for_job(session: "LinkedInSession", job_id: str):
@@ -102,19 +164,19 @@ def _unsave_card(session: "LinkedInSession", card, job_id: str) -> dict:
     return {**job, "saved": still_saved, "changed": not still_saved}
 
 
-def list_saved_jobs(session: "LinkedInSession", *, page: int = 1) -> dict:
+def list_saved_jobs(session: "LinkedInSession", *, page: int = 1, card_type: str = "saved", limit: int = 10) -> dict:
     """Return visible jobs from LinkedIn's saved jobs page."""
-    _open(session)
+    _open(session, card_type=card_type)
+    _click_page(session, page)
 
     jobs, seen = [], set()
-    for link in session.page.locator(JOB_LINKS_SELECTOR).all():
-        job = _job_from_link(session.page, link)
-        if not job or job["job_id"] in seen:
-            continue
-        seen.add(job["job_id"])
-        jobs.append(job)
+    while len(jobs) < limit:
+        _scroll_until_count(session.page, limit=10)
+        jobs.extend(_visible_jobs(session.page, seen, remaining=limit - len(jobs)))
+        if len(jobs) >= limit or not _click_next(session):
+            break
 
-    return {"page": page, "jobs": jobs}
+    return {"page": page, "type": card_type, "limit": limit, "jobs": jobs}
 
 
 def unsave_saved_job(session: "LinkedInSession", job_id_or_url: str) -> dict:

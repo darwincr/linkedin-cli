@@ -9,6 +9,7 @@ from termcolor import colored
 
 from linkedin_cli.browser.nav import goto_page, human_type, resolve_locator
 from linkedin_cli.conf import (
+    BROWSER_ARGS,
     BROWSER_DEFAULT_TIMEOUT_MS,
     BROWSER_LOGIN_TIMEOUT_MS,
     BROWSER_SLOW_MO,
@@ -131,7 +132,7 @@ def submit_login_form(session, username, password):
 def launch_browser(storage_state=None):
     logger.debug("Launching Playwright")
     playwright = sync_playwright().start()
-    browser = playwright.chromium.launch(headless=False, slow_mo=BROWSER_SLOW_MO)
+    browser = playwright.chromium.launch(headless=False, slow_mo=BROWSER_SLOW_MO, args=BROWSER_ARGS)
     context = browser.new_context(storage_state=storage_state)
     context.set_default_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
     context.set_default_navigation_timeout(BROWSER_DEFAULT_TIMEOUT_MS)

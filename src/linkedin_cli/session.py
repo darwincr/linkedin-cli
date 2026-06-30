@@ -24,7 +24,7 @@ from typing import Protocol, runtime_checkable
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 from playwright_stealth import Stealth
 
-from linkedin_cli.conf import BROWSER_DEFAULT_TIMEOUT_MS, BROWSER_HEADLESS, BROWSER_SLOW_MO
+from linkedin_cli.conf import BROWSER_ARGS, BROWSER_DEFAULT_TIMEOUT_MS, BROWSER_HEADLESS, BROWSER_SLOW_MO
 from linkedin_cli.profile_locks import remove_stale_chromium_locks
 
 logger = logging.getLogger(__name__)
@@ -244,6 +244,7 @@ class WorkerLinkedInSession:
             str(profile_dir),
             headless=BROWSER_HEADLESS,
             slow_mo=BROWSER_SLOW_MO,
+            args=BROWSER_ARGS,
         )
         self.context.set_default_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
         self.context.set_default_navigation_timeout(BROWSER_DEFAULT_TIMEOUT_MS)

@@ -187,9 +187,10 @@ def _human_jobs_search(result: dict) -> str:
 
 def _human_jobs_saved(result: dict) -> str:
     jobs = result.get("jobs") or []
+    card_type = result.get("type", "saved")
     if not jobs:
-        return "(no saved jobs)"
-    header = f"{len(jobs)} saved job(s):"
+        return f"(no {card_type} jobs)"
+    header = f"{len(jobs)} {card_type} job(s):"
     return "\n".join(
         [header] + [
             "  " + " — ".join(x for x in (j.get("job_id"), j.get("title"), j.get("company")) if x)
@@ -574,7 +575,7 @@ def _verb_jobs_search(session, args) -> dict:
 def _verb_jobs_saved(session, args) -> dict:
     from linkedin_cli.actions.jobs import saved_jobs
 
-    return saved_jobs(session, page=args.page)
+    return saved_jobs(session, page=args.page, card_type=args.type, limit=args.limit)
 
 
 def _verb_jobs_show(session, args) -> dict:
@@ -1038,6 +1039,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_jobs_saved = jobs_sub.add_parser("saved", parents=[common], help="List saved LinkedIn jobs")
     p_jobs_saved.add_argument("--page", type=int, default=1, help="Result page (default: 1)")
+    p_jobs_saved.add_argument("--limit", type=int, default=10, help="Maximum visible jobs to return (default: 10)")
+    p_jobs_saved.add_argument(
+        "--type",
+        choices=["saved", "in-progress", "applied", "archived"],
+        default="saved",
+        help="Saved jobs card type to list (default: saved)",
+    )
 
     jobs_handle_help = "LinkedIn job id or URL"
     jobs_sub.add_parser("show", parents=[common], help="Show structured details for a LinkedIn job").add_argument("job", help=jobs_handle_help)

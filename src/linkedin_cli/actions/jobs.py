@@ -330,11 +330,11 @@ def search_jobs(
     }
 
 
-def saved_jobs(session: "LinkedInSession", *, page: int = 1) -> dict:
+def saved_jobs(session: "LinkedInSession", *, page: int = 1, card_type: str = "saved", limit: int = 10) -> dict:
     """Return the visible jobs from LinkedIn's saved jobs page."""
     from linkedin_cli.actions.saved_jobs import list_saved_jobs
 
-    return list_saved_jobs(session, page=page)
+    return list_saved_jobs(session, page=page, card_type=card_type, limit=limit)
 
 
 def open_job(session: "LinkedInSession", job_id_or_url: str) -> dict:
