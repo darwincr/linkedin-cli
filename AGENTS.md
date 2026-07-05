@@ -112,6 +112,12 @@ Review local changes:
 git diff
 ```
 
+Upgrade the system-installed CLI after pushing a new version upstream. The `linkedin-cli` on this machine is installed via `uv tool` from the git remote (non-editable), so it does not track local edits. After pushing, run this to refresh the installed binary at `/Users/darwin/.local/bin/linkedin-cli`:
+
+```bash
+uv tool install --force git+ssh://git@github.com/darwincr/linkedin-cli.git
+```
+
 ## Live Browser Testing
 
 Use the live browser for tests that depend on LinkedIn DOM structure, navigation, or authenticated APIs.
